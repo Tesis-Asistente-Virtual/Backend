@@ -17,4 +17,5 @@ export const env = {
   jwtAudience: process.env.JWT_AUDIENCE ?? 'tesis-mobile-app',
   accessTokenTtlSeconds: positiveSeconds('ACCESS_TOKEN_TTL_SECONDS', 900),
   refreshTokenTtlSeconds: positiveSeconds('REFRESH_TOKEN_TTL_SECONDS', 604800),
+  openApiEnabled: process.env.OPENAPI_ENABLED === 'true',
 };

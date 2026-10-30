@@ -1,0 +1,6 @@
+export const usersPaths = {
+    '/api/v1/users/me': {
+        get: { tags: ['Users'], summary: 'Consultar perfil propio', security: [{ bearerAuth: [] }], responses: { '200': { description: 'Perfil del estudiante', content: { 'application/json': { schema: { $ref: '#/components/schemas/UserProfileResponse' }, example: { firstName: null, lastName: null, phone: null } } } }, '401': { $ref: '#/components/responses/Unauthorized' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } },
+        patch: { tags: ['Users'], summary: 'Actualizar perfil propio', security: [{ bearerAuth: [] }], requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/UpdateMyProfileRequest' }, example: { firstName: 'Carlos', lastName: 'Perez', phone: '987654321' } } } }, responses: { '200': { description: 'Perfil actualizado', content: { 'application/json': { schema: { $ref: '#/components/schemas/UserProfileResponse' } } } }, '400': { $ref: '#/components/responses/BadRequest' }, '401': { $ref: '#/components/responses/Unauthorized' }, '404': { $ref: '#/components/responses/NotFound' }, '500': { $ref: '#/components/responses/ServerError' } } },
+    },
+};

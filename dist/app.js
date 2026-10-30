@@ -4,8 +4,10 @@ import { authenticationRouter } from './modules/authentication/interfaces/rest/s
 import { signInRouter } from './modules/authentication/interfaces/rest/sign-in-routes.js';
 import { sessionRouter } from './modules/authentication/interfaces/rest/session-routes.js';
 import { usersRouter } from './modules/users/interfaces/rest/users-routes.js';
+import { openApiRouter } from './shared/infrastructure/http/openapi-routes.js';
 export const app = express();
 app.use(express.json());
+app.use(openApiRouter);
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/v1/auth', authenticationRouter);
 app.use('/api/v1/auth', signInRouter);

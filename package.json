@@ -4,7 +4,9 @@
   "description": "",
   "main": "dist/server.js",
   "scripts": {
-    "test": "vitest run",
+    "test": "vitest run --exclude tests/integration/**",
+    "test:integration": "vitest run tests/integration",
+    "db:migrate:test": "tsx scripts/migrate-test-db.ts",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
