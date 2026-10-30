@@ -1,8 +1,14 @@
 import express from 'express';
 import { errorHandler } from './shared/infrastructure/http/error-handler.js';
 import { authenticationRouter } from './modules/authentication/interfaces/rest/sign-up-routes.js';
+import { signInRouter } from './modules/authentication/interfaces/rest/sign-in-routes.js';
+import { sessionRouter } from './modules/authentication/interfaces/rest/session-routes.js';
+import { usersRouter } from './modules/users/interfaces/rest/users-routes.js';
 export const app = express();
 app.use(express.json());
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/v1/auth', authenticationRouter);
+app.use('/api/v1/auth', signInRouter);
+app.use('/api/v1/auth', sessionRouter);
+app.use('/api/v1/users', usersRouter);
 app.use(errorHandler);

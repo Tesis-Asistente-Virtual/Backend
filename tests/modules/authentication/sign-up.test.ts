@@ -12,6 +12,8 @@ function createHarness(options: { duplicate?: boolean; failProfile?: boolean } =
   const profiles = new Map<string, { accountId: string }>();
   const accountRepository: AuthAccountRepository = {
     findByEmail: vi.fn(async email => accounts.has(email) || options.duplicate === true),
+    findCredentialsByEmail: vi.fn(async () => null),
+    findStatusById: vi.fn(async () => null),
     create: vi.fn(async (email, passwordHash) => {
       const row = { id: 'account-id', email, passwordHash };
       accounts.set(email, row);
@@ -23,6 +25,8 @@ function createHarness(options: { duplicate?: boolean; failProfile?: boolean } =
       if (options.failProfile) throw new Error('simulated profile failure');
       profiles.set(accountId, { accountId });
     }),
+    findByAccountId: vi.fn(async () => null),
+    updateByAccountId: vi.fn(async () => null),
   };
   const uow: SignUpUnitOfWork = {
     execute: async work => {
