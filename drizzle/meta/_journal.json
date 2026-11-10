@@ -15,6 +15,13 @@
       "when": 1793321611087,
       "tag": "0001_watery_venom",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794337660028,
+      "tag": "0002_melted_spacker_dave",
+      "breakpoints": true
     }
   ]
 }
