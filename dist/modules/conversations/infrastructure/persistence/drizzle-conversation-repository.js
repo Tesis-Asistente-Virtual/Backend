@@ -22,10 +22,13 @@ export class DrizzleConversationRepository {
             .where(and(eq(conversations.id, id), eq(conversations.accountId, accountId))).limit(1);
         return row ? toDomain(row) : null;
     }
-    async listByOwner(accountId) {
+    async listByOwner(accountId, pagination) {
         const rows = await this.db.select().from(conversations)
             .where(eq(conversations.accountId, accountId))
-            .orderBy(desc(conversations.createdAt), desc(conversations.id));
-        return rows.map(toDomain);
+            .orderBy(desc(conversations.createdAt), desc(conversations.id))
+            .limit(pagination.limit + 1)
+            .offset(pagination.offset);
+        const hasMore = rows.length > pagination.limit;
+        return { items: rows.slice(0, pagination.limit).map(toDomain), limit: pagination.limit, offset: pagination.offset, hasMore };
     }
 }

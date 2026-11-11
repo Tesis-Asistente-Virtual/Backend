@@ -1,7 +1,8 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { createConversationMessage, messageRoles, messageStatuses, orderConversationMessages, type ConversationMessage, type MessageRole, type MessageStatus, type NewConversationMessage } from '../../domain/model/conversation-message.js';
+import type { Page, Pagination } from '../../domain/model/pagination.js';
 import type { ConversationMessageRepository } from '../../domain/repositories/conversation-message-repository.js';
 import { conversationMessages, conversations } from './schema.js';
 
@@ -23,7 +24,7 @@ export class DrizzleConversationMessageRepository implements ConversationMessage
     return row ? toDomain(row) : null;
   }
 
-  async listByConversationForOwner(conversationId: string, accountId: string): Promise<ConversationMessage[]> {
+  async listByConversationForOwner(conversationId: string, accountId: string, pagination: Pagination): Promise<Page<ConversationMessage>> {
     const rows = await this.db.select({
       id: conversationMessages.id,
       conversationId: conversationMessages.conversationId,
@@ -34,7 +35,30 @@ export class DrizzleConversationMessageRepository implements ConversationMessage
     }).from(conversationMessages)
       .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
       .where(and(eq(conversationMessages.conversationId, conversationId), eq(conversations.accountId, accountId)))
-      .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id));
+      .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id))
+      .limit(pagination.limit + 1)
+      .offset(pagination.offset);
+    const hasMore = rows.length > pagination.limit;
+    return { items: orderConversationMessages(rows.slice(0, pagination.limit).map(toDomain)), limit: pagination.limit, offset: pagination.offset, hasMore };
+  }
+
+  async listRecentCompletedForOwner(conversationId: string, accountId: string, limit: number): Promise<ConversationMessage[]> {
+    const rows = await this.db.select({
+      id: conversationMessages.id,
+      conversationId: conversationMessages.conversationId,
+      role: conversationMessages.role,
+      content: conversationMessages.content,
+      status: conversationMessages.status,
+      createdAt: conversationMessages.createdAt,
+    }).from(conversationMessages)
+      .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+      .where(and(
+        eq(conversationMessages.conversationId, conversationId),
+        eq(conversations.accountId, accountId),
+        eq(conversationMessages.status, 'completed'),
+      ))
+      .orderBy(desc(conversationMessages.createdAt), desc(conversationMessages.id))
+      .limit(limit);
     return orderConversationMessages(rows.map(toDomain));
   }
 }

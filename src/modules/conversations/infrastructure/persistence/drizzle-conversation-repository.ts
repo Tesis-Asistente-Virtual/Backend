@@ -2,6 +2,7 @@ import { and, desc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { createConversation, conversationStatuses, type Conversation, type ConversationStatus, type NewConversation } from '../../domain/model/conversation.js';
+import type { Page, Pagination } from '../../domain/model/pagination.js';
 import type { ConversationRepository } from '../../domain/repositories/conversation-repository.js';
 import { conversations } from './schema.js';
 
@@ -25,10 +26,13 @@ export class DrizzleConversationRepository implements ConversationRepository {
     return row ? toDomain(row) : null;
   }
 
-  async listByOwner(accountId: string): Promise<Conversation[]> {
+  async listByOwner(accountId: string, pagination: Pagination): Promise<Page<Conversation>> {
     const rows = await this.db.select().from(conversations)
       .where(eq(conversations.accountId, accountId))
-      .orderBy(desc(conversations.createdAt), desc(conversations.id));
-    return rows.map(toDomain);
+      .orderBy(desc(conversations.createdAt), desc(conversations.id))
+      .limit(pagination.limit + 1)
+      .offset(pagination.offset);
+    const hasMore = rows.length > pagination.limit;
+    return { items: rows.slice(0, pagination.limit).map(toDomain), limit: pagination.limit, offset: pagination.offset, hasMore };
   }
 }

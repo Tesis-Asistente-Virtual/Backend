@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { createConversationMessage, messageRoles, messageStatuses, orderConversationMessages } from '../../domain/model/conversation-message.js';
 import { conversationMessages, conversations } from './schema.js';
 function toDomain(row) {
@@ -21,7 +21,7 @@ export class DrizzleConversationMessageRepository {
         const [row] = await this.db.insert(conversationMessages).values(input).returning();
         return row ? toDomain(row) : null;
     }
-    async listByConversationForOwner(conversationId, accountId) {
+    async listByConversationForOwner(conversationId, accountId, pagination) {
         const rows = await this.db.select({
             id: conversationMessages.id,
             conversationId: conversationMessages.conversationId,
@@ -32,7 +32,25 @@ export class DrizzleConversationMessageRepository {
         }).from(conversationMessages)
             .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
             .where(and(eq(conversationMessages.conversationId, conversationId), eq(conversations.accountId, accountId)))
-            .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id));
+            .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id))
+            .limit(pagination.limit + 1)
+            .offset(pagination.offset);
+        const hasMore = rows.length > pagination.limit;
+        return { items: orderConversationMessages(rows.slice(0, pagination.limit).map(toDomain)), limit: pagination.limit, offset: pagination.offset, hasMore };
+    }
+    async listRecentCompletedForOwner(conversationId, accountId, limit) {
+        const rows = await this.db.select({
+            id: conversationMessages.id,
+            conversationId: conversationMessages.conversationId,
+            role: conversationMessages.role,
+            content: conversationMessages.content,
+            status: conversationMessages.status,
+            createdAt: conversationMessages.createdAt,
+        }).from(conversationMessages)
+            .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+            .where(and(eq(conversationMessages.conversationId, conversationId), eq(conversations.accountId, accountId), eq(conversationMessages.status, 'completed')))
+            .orderBy(desc(conversationMessages.createdAt), desc(conversationMessages.id))
+            .limit(limit);
         return orderConversationMessages(rows.map(toDomain));
     }
 }
