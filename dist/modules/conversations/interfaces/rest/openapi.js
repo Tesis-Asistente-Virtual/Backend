@@ -20,6 +20,7 @@ const security = [{ bearerAuth: [] }];
 export const conversationsSchemas = {
     CreateConversationRequest: schema(createConversationRequestSchema),
     SendConversationMessageRequest: schema(sendConversationMessageRequestSchema),
+    StreamConversationMessageRequest: schema(sendConversationMessageRequestSchema),
     ConversationResponse: schema(conversationResponse),
     ConversationMessageResponse: schema(messageResponse),
     SentConversationTurnResponse: schema(sentTurnResponse),
@@ -81,6 +82,27 @@ export const conversationsPaths = {
             responses: {
                 '200': { description: 'Página de mensajes', content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationMessagePageResponse' } } } },
                 '400': badRequest, '401': unauthorized, '404': notFound, '500': serverError,
+            },
+        },
+    },
+    '/api/v1/conversations/{id}/messages/stream': {
+        post: {
+            tags: ['Conversations'], summary: 'Enviar mensaje y recibir la respuesta progresivamente mediante SSE', security,
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+            requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/StreamConversationMessageRequest' }, example: { content: 'Quiero conversar sobre cómo me he sentido últimamente.' } } } },
+            responses: {
+                '200': {
+                    description: 'Flujo SSE progresivo. Swagger UI puede no representar incrementalmente todos los eventos.',
+                    content: { 'text/event-stream': { schema: { type: 'string' }, examples: {
+                                started: { summary: 'Inicio del turno', value: 'event: message.started\\ndata: {"messageId":"550e8400-e29b-41d4-a716-446655440002"}\\n\\n' },
+                                delta: { summary: 'Fragmento de texto', value: 'event: message.delta\\ndata: {"text":"Hola, "}\\n\\n' },
+                                completed: { summary: 'Turno persistido', value: 'event: message.completed\\ndata: {"messageId":"550e8400-e29b-41d4-a716-446655440003","status":"completed"}\\n\\nevent: stream.completed\\ndata: {}\\n\\n' },
+                                error: { summary: 'Fallo después del inicio', value: 'event: stream.error\\ndata: {"code":"generation_failed"}\\n\\n' },
+                            } } },
+                },
+                '400': badRequest, '401': unauthorized, '404': notFound,
+                '409': { $ref: '#/components/responses/ConversationConflict' },
+                '503': { $ref: '#/components/responses/AssistantUnavailable' }, '500': serverError,
             },
         },
     },

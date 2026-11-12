@@ -183,7 +183,10 @@ describe('Conversations PostgreSQL integration', () => {
     await messageRepository.createForOwner(owner.id, { conversationId: conversation.id, role: 'assistant', content: '', status: 'failed' });
     await messageRepository.createForOwner(other.id, { conversationId: otherConversation.id, role: 'user', content: 'Other account private content' });
     let context: AiTextGenerationRequest | undefined;
-    const generator: AiTextGenerator = { generateText: async request => { context = request; return { text: 'Generated test answer' }; } };
+    const generator: AiTextGenerator = {
+      generateText: async request => { context = request; return { text: 'Generated test answer' }; },
+      async *streamText() {},
+    };
     const service = new SendConversationMessage(conversationRepository, messageRepository, generator, new PostgresConversationTurnLock(pool), 10, 200);
 
     const result = await service.execute(owner.id, conversation.id, 'Current student question');
@@ -209,6 +212,7 @@ describe('Conversations PostgreSQL integration', () => {
     let providerCalls = 0;
     const generator: AiTextGenerator = {
       generateText: async () => { providerCalls += 1; announceProviderStarted(); await providerGate; return { text: 'One serialized answer' }; },
+      async *streamText() {},
     };
     const service = new SendConversationMessage(
       new DrizzleConversationRepository(db), messageRepository, generator,

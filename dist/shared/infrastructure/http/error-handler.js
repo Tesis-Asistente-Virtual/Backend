@@ -10,6 +10,10 @@ function hasUniqueViolationCode(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
 export const errorHandler = (err, _req, res, _next) => {
+    if (res.headersSent) {
+        _next(err);
+        return;
+    }
     if (err instanceof ZodError) {
         res.status(400).json({ error: 'Invalid request data' });
         return;

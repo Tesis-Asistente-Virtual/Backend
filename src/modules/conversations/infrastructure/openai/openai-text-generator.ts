@@ -1,19 +1,56 @@
-import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError, AuthenticationError, RateLimitError } from 'openai';
-import type { AiTextGenerationRequest, AiTextGenerationResult, AiTextGenerator } from '../../application/ports/ai-text-generator.js';
+import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError, AuthenticationError, RateLimitError } from 'openai';
+import { AiTextGenerationError, type AiTextGenerationFailureKind, type AiTextGenerationRequest, type AiTextGenerationResult, type AiTextGenerator, type AiTextIncompleteReason, type AiTextStreamEvent } from '../../application/ports/ai-text-generator.js';
 import { enforceAiTextGenerationLimits } from '../../application/ports/ai-text-generation-policy.js';
 import { env } from '../../../../config/env.js';
 import { resolveOpenAiConfiguration, type OpenAiConfiguration, type OpenAiEnvironmentSettings } from './openai-configuration.js';
 
-export type OpenAiTextGenerationFailureKind = 'authentication' | 'rate_limit' | 'timeout' | 'connection' | 'invalid_response' | 'provider';
+export type OpenAiTextGenerationFailureKind = AiTextGenerationFailureKind;
 
-export class OpenAiTextGenerationError extends Error {
-  constructor(readonly kind: OpenAiTextGenerationFailureKind, message: string) {
-    super(message);
+export class OpenAiTextGenerationError extends AiTextGenerationError {
+  constructor(readonly kind: OpenAiTextGenerationFailureKind, message: string, readonly incompleteReason?: AiTextIncompleteReason) {
+    super(kind, message, incompleteReason);
     this.name = 'OpenAiTextGenerationError';
   }
 }
 
 type OpenAiClient = Pick<OpenAI, 'responses'>;
+
+function generationLimits(configuration: OpenAiConfiguration) {
+  return {
+    maxContextMessages: configuration.maxContextMessages,
+    maxContextCharacters: configuration.maxContextCharacters,
+    maxOutputTokens: configuration.maxOutputTokens,
+    defaultOutputTokens: configuration.maxOutputTokens,
+  };
+}
+
+function resultUsage(response: OpenAI.Responses.Response): AiTextGenerationResult['usage'] {
+  return response.usage ? {
+    inputTokens: response.usage.input_tokens,
+    outputTokens: response.usage.output_tokens,
+    totalTokens: response.usage.total_tokens,
+  } : undefined;
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
+}
+
+async function nextWithAbort<T>(next: Promise<IteratorResult<T>>, signal?: AbortSignal): Promise<IteratorResult<T>> {
+  if (!signal) return next;
+  if (signal.aborted) throw new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled');
+  let removeAbortListener = () => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const onAbort = () => reject(new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+  });
+  try {
+    return await Promise.race([next, aborted]);
+  } finally {
+    removeAbortListener();
+  }
+}
 
 function mapProviderError(error: unknown): OpenAiTextGenerationError {
   if (error instanceof APIConnectionTimeoutError) {
@@ -48,12 +85,7 @@ export class OpenAiTextGenerator implements AiTextGenerator {
   }
 
   async generateText(request: AiTextGenerationRequest): Promise<AiTextGenerationResult> {
-    const bounded = enforceAiTextGenerationLimits(request, {
-      maxContextMessages: this.configuration.maxContextMessages,
-      maxContextCharacters: this.configuration.maxContextCharacters,
-      maxOutputTokens: this.configuration.maxOutputTokens,
-      defaultOutputTokens: this.configuration.maxOutputTokens,
-    });
+    const bounded = enforceAiTextGenerationLimits(request, generationLimits(this.configuration));
 
     let response: OpenAI.Responses.Response;
     try {
@@ -75,15 +107,98 @@ export class OpenAiTextGenerator implements AiTextGenerator {
     }
     const text = response.output_text.trim();
     if (!text) throw new OpenAiTextGenerationError('invalid_response', 'Text generation provider returned empty text');
-    return {
-      text,
-      ...(response.usage ? {
-        usage: {
-          inputTokens: response.usage.input_tokens,
-          outputTokens: response.usage.output_tokens,
-          totalTokens: response.usage.total_tokens,
-        },
-      } : {}),
-    };
+    const usage = resultUsage(response);
+    return { text, ...(usage ? { usage } : {}) };
+  }
+
+  async *streamText(request: AiTextGenerationRequest, signal?: AbortSignal): AsyncIterable<AiTextStreamEvent> {
+    const bounded = enforceAiTextGenerationLimits(request, generationLimits(this.configuration));
+    if (signal?.aborted) throw new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled');
+
+    let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>;
+    try {
+      stream = await this.client.responses.create({
+        model: this.configuration.model,
+        instructions: bounded.instructions,
+        input: bounded.messages.map(({ role, content }) => ({ role, content })),
+        max_output_tokens: bounded.maxOutputTokens,
+        store: false,
+        stream: true,
+        tools: [],
+      }, { timeout: this.configuration.timeoutMs, maxRetries: 0, signal });
+    } catch (error) {
+      if (signal?.aborted || error instanceof APIUserAbortError || isAbortError(error)) {
+        throw new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled');
+      }
+      throw mapProviderError(error);
+    }
+
+    const iterator = stream[Symbol.asyncIterator]();
+    let accumulatedText = '';
+    let lastSequenceNumber = -1;
+    let completed = false;
+    try {
+      while (true) {
+        let step: IteratorResult<OpenAI.Responses.ResponseStreamEvent>;
+        try {
+          step = await nextWithAbort(Promise.resolve(iterator.next()), signal);
+        } catch (error) {
+          if (signal?.aborted || error instanceof APIUserAbortError || isAbortError(error)) {
+            throw new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled');
+          }
+          if (error instanceof OpenAiTextGenerationError) throw error;
+          throw mapProviderError(error);
+        }
+        if (step.done) break;
+
+        const event = step.value;
+        if (event.sequence_number <= lastSequenceNumber) continue;
+        lastSequenceNumber = event.sequence_number;
+
+        if (event.type === 'response.output_text.delta') {
+          if (!event.delta) continue;
+          accumulatedText += event.delta;
+          yield { type: 'delta', text: event.delta };
+          continue;
+        }
+
+        if (event.type === 'response.completed') {
+          if (event.response.status !== 'completed' || event.response.error !== null) {
+            const reason = event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
+            throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', reason);
+          }
+          const text = event.response.output_text.trim();
+          if (!text) throw new OpenAiTextGenerationError('empty_response', 'Text generation provider returned empty text');
+          if (accumulatedText.trim() !== text) {
+            throw new OpenAiTextGenerationError('invalid_response', 'Text generation stream did not match its final response');
+          }
+          completed = true;
+          const usage = resultUsage(event.response);
+          yield { type: 'completed', result: { text, ...(usage ? { usage } : {}) } };
+          return;
+        }
+
+        if (event.type === 'response.failed') {
+          throw new OpenAiTextGenerationError('provider', 'Text generation provider failed the response');
+        }
+        if (event.type === 'response.incomplete') {
+          const reason = event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
+          throw new OpenAiTextGenerationError('incomplete_response', 'Text generation provider returned an incomplete response', reason);
+        }
+        if (event.type === 'error') {
+          const code = event.code?.toLowerCase() ?? '';
+          const kind = code.includes('auth') || code.includes('api_key') ? 'authentication'
+            : code.includes('rate_limit') ? 'rate_limit' : 'provider';
+          throw new OpenAiTextGenerationError(kind, 'Text generation provider emitted an error');
+        }
+      }
+    } finally {
+      if (!completed) {
+        try { await iterator.return?.(); } catch { /* Close best-effort without exposing SDK details. */ }
+      }
+    }
+
+    if (signal?.aborted) throw new OpenAiTextGenerationError('cancelled', 'Text generation was cancelled');
+    if (!completed) throw new OpenAiTextGenerationError('incomplete_response', 'Text generation stream ended without a completion event');
   }
 }

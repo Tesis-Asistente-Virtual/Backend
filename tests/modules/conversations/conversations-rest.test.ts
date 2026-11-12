@@ -34,7 +34,10 @@ function harness(foundConversation: Conversation | null = conversation, generati
     listByConversationForOwner: vi.fn(async (_id: string, _ownerId: string, pagination: Pagination): Promise<Page<ConversationMessage>> => ({ items: [message], ...pagination, hasMore: false })),
     listRecentCompletedForOwner: vi.fn(async () => []),
   };
-  const generator: AiTextGenerator = { generateText: vi.fn(async () => ({ text: 'Generated response' })) };
+  const generator: AiTextGenerator = {
+    generateText: vi.fn(async () => ({ text: 'Generated response' })),
+    async *streamText() {},
+  };
   const lock: ConversationTurnLock = { runExclusive: vi.fn(async (_id, operation) => operation()) };
   return {
     controller: new ConversationsController(

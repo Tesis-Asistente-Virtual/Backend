@@ -13,26 +13,32 @@ import { OpenAiTextGenerator } from '../../infrastructure/openai/openai-text-gen
 import { OpenAiConfigurationError } from '../../infrastructure/openai/openai-configuration.js';
 import { PostgresConversationTurnLock } from '../../infrastructure/persistence/postgres-conversation-turn-lock.js';
 import { SendConversationMessage } from '../../application/internal/command-services/send-conversation-message.js';
+import { StreamConversationMessage } from '../../application/internal/command-services/stream-conversation-message.js';
 import { env } from '../../../../config/env.js';
+import { ConsoleConversationStreamObserver } from '../../infrastructure/observability/console-conversation-stream-observer.js';
 const router = Router();
 const jwt = JwtAccessTokenService.fromEnvironment();
 if (db && pool && jwt) {
     const conversations = new DrizzleConversationRepository(db);
     const messages = new DrizzleConversationMessageRepository(db);
+    const turnLock = new PostgresConversationTurnLock(pool);
     let sendMessage;
+    let streamMessage;
     try {
         const generator = new OpenAiTextGenerator(env);
-        sendMessage = new SendConversationMessage(conversations, messages, generator, new PostgresConversationTurnLock(pool), env.openAiMaxContextMessages, env.openAiMaxOutputTokens);
+        sendMessage = new SendConversationMessage(conversations, messages, generator, turnLock, env.openAiMaxContextMessages, env.openAiMaxOutputTokens);
+        streamMessage = new StreamConversationMessage(conversations, messages, generator, turnLock, env.openAiMaxContextMessages, env.openAiMaxOutputTokens, new ConsoleConversationStreamObserver());
     }
     catch (error) {
         if (!(error instanceof OpenAiConfigurationError))
             throw error;
     }
-    const controller = new ConversationsController(new CreateConversation(conversations), new ListConversations(conversations), new GetConversation(conversations), new ListConversationMessages(conversations, messages), sendMessage);
+    const controller = new ConversationsController(new CreateConversation(conversations), new ListConversations(conversations), new GetConversation(conversations), new ListConversationMessages(conversations, messages), sendMessage, streamMessage);
     router.post('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.create(req, res).catch(next); });
     router.get('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.list(req, res).catch(next); });
     router.get('/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.listConversationMessages(req, res).catch(next); });
     router.post('/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.sendConversationMessage(req, res).catch(next); });
+    router.post('/:id/messages/stream', authenticationMiddleware(jwt), (req, res, next) => { void controller.streamConversationMessage(req, res).catch(next); });
     router.get('/:id', authenticationMiddleware(jwt), (req, res, next) => { void controller.get(req, res).catch(next); });
 }
 else {
@@ -41,6 +47,7 @@ else {
     }
     router.get('/:id/messages', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
     router.post('/:id/messages', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
+    router.post('/:id/messages/stream', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
     router.get('/:id', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
 }
 export const conversationsRouter = router;

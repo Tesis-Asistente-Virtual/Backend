@@ -43,6 +43,7 @@ function harness(options: { status?: 'active' | 'archived' | null; providerError
       if (options.providerError) throw options.providerError;
       return { text: options.providerText ?? 'Respuesta de apoyo.' };
     }),
+    async *streamText() {},
   };
   const lockCalls: string[] = [];
   const lock: ConversationTurnLock = {

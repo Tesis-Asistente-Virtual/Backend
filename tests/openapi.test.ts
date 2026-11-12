@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { openApiDocument } from '../src/shared/infrastructure/http/openapi-document.js';
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all twelve operations', () => {
+  it('generates OpenAPI 3.0 documentation for all thirteen operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(12);
+    expect(operations).toHaveLength(13);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -14,6 +14,7 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages/stream');
     expect(openApiDocument.paths).toHaveProperty('/health');
     expect(openApiDocument.components.schemas).toHaveProperty('SignUpRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('UpdateMyProfileRequest');
@@ -34,5 +35,6 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths['/api/v1/conversations/{id}'].get.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].get.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/conversations/{id}/messages/stream'].post.security).toEqual([{ bearerAuth: [] }]);
   });
 });
