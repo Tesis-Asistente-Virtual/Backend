@@ -71,7 +71,17 @@ describe('token security services', () => {
   it('rejects signatures, algorithms, issuer and audience that do not match', async () => {
     const jwt = new JwtAccessTokenService('c'.repeat(32), 'issuer', 'audience', 900);
     const valid = await jwt.issue('account-uuid');
-    const altered = `${valid.slice(0, -1)}${valid.endsWith('a') ? 'b' : 'a'}`;
+    const jwtSegments = valid.split('.');
+    expect(jwtSegments).toHaveLength(3);
+    const signature = jwtSegments[2];
+    if (!signature) throw new Error('JWT signature segment is missing');
+    const signatureIndex = Math.floor(signature.length / 2);
+    const signatureAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const currentCharacter = signature[signatureIndex];
+    if (!currentCharacter) throw new Error('JWT signature segment is empty');
+    const nextCharacterIndex = (signatureAlphabet.indexOf(currentCharacter) + 1) % signatureAlphabet.length;
+    jwtSegments[2] = `${signature.slice(0, signatureIndex)}${signatureAlphabet[nextCharacterIndex]}${signature.slice(signatureIndex + 1)}`;
+    const altered = jwtSegments.join('.');
     expect(await jwt.verify(altered)).toBeNull();
 
     const secret = new TextEncoder().encode('c'.repeat(32));

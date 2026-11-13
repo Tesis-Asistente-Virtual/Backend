@@ -6,6 +6,7 @@ import { signOutSchema } from '../../../modules/authentication/application/inter
 import { updateMyProfileSchema } from '../../../modules/users/interfaces/rest/validation/update-my-profile-schema.js';
 import { authenticationPaths } from '../../../modules/authentication/interfaces/rest/openapi.js';
 import { usersPaths } from '../../../modules/users/interfaces/rest/openapi.js';
+import { conversationsPaths, conversationsSchemas } from '../../../modules/conversations/interfaces/rest/openapi.js';
 
 const profile = z.object({ firstName: z.string().nullable(), lastName: z.string().nullable(), phone: z.string().nullable() });
 const errorResponse = z.object({ error: z.string() });
@@ -19,10 +20,11 @@ export const openApiDocument = {
     description: 'API REST para autenticación y gestión de perfiles de estudiantes universitarios.',
   },
   servers: [{ url: 'http://localhost:3000', description: 'Servidor local' }],
-  tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Health' }],
+  tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Conversations' }, { name: 'Health' }],
   paths: {
     ...authenticationPaths,
     ...usersPaths,
+    ...conversationsPaths,
     '/health': { get: { tags: ['Health'], summary: 'Verificar disponibilidad del servicio', responses: { '200': { description: 'Servicio disponible', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'ok' } }, required: ['status'] } } } } } } },
   },
   components: {
@@ -37,12 +39,16 @@ export const openApiDocument = {
       UserProfileResponse: schema(profile),
       UpdateMyProfileRequest: schema(updateMyProfileSchema),
       ErrorResponse: schema(errorResponse),
+      ...conversationsSchemas,
     },
     responses: {
       BadRequest: { description: 'Solicitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Invalid request data' } } } },
       Unauthorized: { description: 'Autenticación o token inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
       Conflict: { description: 'Email ya registrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Email is already registered' } } } },
       NotFound: { description: 'Perfil no encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+      ConversationNotFound: { description: 'Conversación no encontrada', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Conversation not found' } } } },
+      ConversationConflict: { description: 'Conversación archivada o turno en curso', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
+      AssistantUnavailable: { description: 'Generación temporalmente no disponible', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Text generation is temporarily unavailable' } } } },
       TooManyRequests: { description: 'Límite de solicitudes excedido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Too many attempts' } } } },
       ServerError: { description: 'Error interno', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Internal server error' } } } },
     },

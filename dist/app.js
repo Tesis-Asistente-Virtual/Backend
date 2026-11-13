@@ -4,6 +4,7 @@ import { authenticationRouter } from './modules/authentication/interfaces/rest/s
 import { signInRouter } from './modules/authentication/interfaces/rest/sign-in-routes.js';
 import { sessionRouter } from './modules/authentication/interfaces/rest/session-routes.js';
 import { usersRouter } from './modules/users/interfaces/rest/users-routes.js';
+import { conversationsRouter } from './modules/conversations/interfaces/rest/conversations-routes.js';
 import { openApiRouter } from './shared/infrastructure/http/openapi-routes.js';
 export const app = express();
 app.use(express.json());
@@ -13,4 +14,5 @@ app.use('/api/v1/auth', authenticationRouter);
 app.use('/api/v1/auth', signInRouter);
 app.use('/api/v1/auth', sessionRouter);
 app.use('/api/v1/users', usersRouter);
+app.use('/api/v1/conversations', conversationsRouter);
 app.use(errorHandler);
