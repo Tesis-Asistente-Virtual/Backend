@@ -1,7 +1,7 @@
 import type { ConversationMessage } from '../../../domain/model/conversation-message.js';
 import type { ConversationRepository } from '../../../domain/repositories/conversation-repository.js';
 import type { ConversationMessageRepository } from '../../../domain/repositories/conversation-message-repository.js';
-import { AiTextGenerationError, type AiTextContextMessage, type AiTextGenerator, type AiTextGenerationRequest, type AiTextStreamEvent } from '../../ports/ai-text-generator.js';
+import { AiTextGenerationError, type AiTextContextMessage, type AiTextGenerationFailureStage, type AiTextGenerator, type AiTextGenerationRequest, type AiTextStreamEvent } from '../../ports/ai-text-generator.js';
 import type { ConversationStreamFailureObservation, ConversationStreamObserver } from '../../ports/conversation-stream-observer.js';
 import { noOpConversationStreamObserver } from '../../ports/conversation-stream-observer.js';
 import type { ConversationTurnLock } from '../../ports/conversation-turn-lock.js';
@@ -27,9 +27,19 @@ function generationRequest(messages: readonly AiTextContextMessage[], maxOutputT
   return { instructions: assistantInstructions, messages: messages.map(({ role, content }) => ({ role, content })), maxOutputTokens };
 }
 
-function providerFailure(error: unknown): { errorKind: ConversationStreamFailureObservation['errorKind']; incompleteReason?: ConversationStreamFailureObservation['incompleteReason'] } {
+type ProviderFailure = {
+  readonly errorKind: ConversationStreamFailureObservation['errorKind'];
+  readonly incompleteReason?: ConversationStreamFailureObservation['incompleteReason'];
+  readonly failureStage?: AiTextGenerationFailureStage;
+};
+
+function providerFailure(error: unknown): ProviderFailure {
   if (error instanceof AiTextGenerationError) {
-    return { errorKind: error.kind, ...(error.incompleteReason ? { incompleteReason: error.incompleteReason } : {}) };
+    return {
+      errorKind: error.kind,
+      ...(error.incompleteReason ? { incompleteReason: error.incompleteReason } : {}),
+      ...(error.failureStage ? { failureStage: error.failureStage } : {}),
+    };
   }
   return { errorKind: 'unknown' };
 }
@@ -86,7 +96,7 @@ export class StreamConversationMessage {
       let iterator: AsyncIterator<AiTextStreamEvent> | undefined;
       let iteratorDone = false;
       let finalText: string | undefined;
-      let failure: { errorKind: ConversationStreamFailureObservation['errorKind']; incompleteReason?: ConversationStreamFailureObservation['incompleteReason'] } | undefined;
+      let failure: ProviderFailure | undefined;
       try {
         iterator = this.generator.streamText(generationRequest(context, this.maxOutputTokens), generationAbort.signal)[Symbol.asyncIterator]();
         let providerCompleted = false;
@@ -147,7 +157,13 @@ export class StreamConversationMessage {
 
       if (failure) {
         const cancelled = signal.aborted || failure.errorKind === 'cancelled';
-        this.report({ operation: 'conversation_stream', stage: cancelled ? 'cancelled' : failure.errorKind === 'transport' ? 'delta_write' : 'provider_stream', ...failure });
+        const stage = cancelled ? 'cancelled'
+          : failure.errorKind === 'transport' ? 'delta_write'
+            : failure.failureStage ?? 'provider_stream';
+        this.report({
+          operation: 'conversation_stream', stage, errorKind: failure.errorKind,
+          ...(failure.incompleteReason ? { incompleteReason: failure.incompleteReason } : {}),
+        });
         await this.persistFailedMessage(accountId, conversationId);
         if (!cancelled && failure.errorKind !== 'transport') await this.emitError(callbacks, signal, 'generation_failed');
         return;

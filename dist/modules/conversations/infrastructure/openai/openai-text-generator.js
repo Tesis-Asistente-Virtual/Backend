@@ -6,10 +6,12 @@ import { resolveOpenAiConfiguration } from './openai-configuration.js';
 export class OpenAiTextGenerationError extends AiTextGenerationError {
     kind;
     incompleteReason;
-    constructor(kind, message, incompleteReason) {
-        super(kind, message, incompleteReason);
+    failureStage;
+    constructor(kind, message, incompleteReason, failureStage) {
+        super(kind, message, incompleteReason, failureStage);
         this.kind = kind;
         this.incompleteReason = incompleteReason;
+        this.failureStage = failureStage;
         this.name = 'OpenAiTextGenerationError';
     }
 }
@@ -27,6 +29,112 @@ function resultUsage(response) {
         outputTokens: response.usage.output_tokens,
         totalTokens: response.usage.total_tokens,
     } : undefined;
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function invalidResponse(stage, message = 'Text generation provider returned an invalid response') {
+    return new OpenAiTextGenerationError('invalid_response', message, undefined, stage);
+}
+function eventRecord(value) {
+    if (!isRecord(value) || typeof value.type !== 'string' || !value.type)
+        throw invalidResponse('event_validation');
+    if (typeof value.sequence_number !== 'number' || !Number.isSafeInteger(value.sequence_number) || value.sequence_number < 0) {
+        throw invalidResponse('event_validation');
+    }
+    return { record: value, type: value.type, sequenceNumber: value.sequence_number };
+}
+function validateOutputItems(value) {
+    if (!Array.isArray(value))
+        throw invalidResponse('final_text_validation');
+    const items = [];
+    for (const item of value) {
+        if (!isRecord(item) || typeof item.type !== 'string')
+            throw invalidResponse('final_text_validation');
+        if (item.type !== 'message')
+            continue;
+        if (item.role !== 'assistant' || item.status !== 'completed' || !Array.isArray(item.content)) {
+            throw invalidResponse('final_text_validation');
+        }
+        for (const part of item.content) {
+            if (!isRecord(part) || typeof part.type !== 'string')
+                throw invalidResponse('final_text_validation');
+            if (part.type === 'output_text') {
+                if (typeof part.text !== 'string')
+                    throw invalidResponse('final_text_validation');
+            }
+            else if (part.type === 'refusal') {
+                if (typeof part.refusal !== 'string')
+                    throw invalidResponse('final_text_validation');
+            }
+            else {
+                throw invalidResponse('final_text_validation');
+            }
+        }
+        items.push(item);
+    }
+    return items;
+}
+function extractCompletedText(responseValue) {
+    if (!isRecord(responseValue))
+        throw invalidResponse('final_text_validation');
+    const response = responseValue;
+    if (typeof response.status !== 'string')
+        throw invalidResponse('final_text_validation');
+    if (response.status !== 'completed') {
+        const reason = isRecord(response.incomplete_details) && response.incomplete_details.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
+        throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', reason, 'final_text_validation');
+    }
+    if (!Object.hasOwn(response, 'error'))
+        throw invalidResponse('final_text_validation');
+    if (response.error !== null) {
+        throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', undefined, 'final_text_validation');
+    }
+    const outputItems = validateOutputItems(response.output);
+    let text;
+    if (Object.hasOwn(response, 'output_text')) {
+        if (typeof response.output_text !== 'string')
+            throw invalidResponse('final_text_validation');
+        text = response.output_text;
+    }
+    else {
+        text = outputItems.flatMap(item => item.content)
+            .filter(part => part.type === 'output_text')
+            .map(part => part.text)
+            .join('');
+    }
+    const normalizedText = text.trim();
+    if (!normalizedText)
+        throw new OpenAiTextGenerationError('empty_response', 'Text generation provider returned empty text', undefined, 'final_text_validation');
+    return { text: normalizedText, response };
+}
+function validateIncompleteReason(responseValue) {
+    if (!isRecord(responseValue) || responseValue.status !== 'incomplete')
+        throw invalidResponse('event_validation');
+    if (!Object.hasOwn(responseValue, 'incomplete_details'))
+        throw invalidResponse('event_validation');
+    const details = responseValue.incomplete_details;
+    if (details === null)
+        return 'other';
+    if (!isRecord(details))
+        throw invalidResponse('event_validation');
+    if (details.reason !== undefined && typeof details.reason !== 'string')
+        throw invalidResponse('event_validation');
+    return details.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
+}
+function validateUsage(value) {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!isRecord(value))
+        throw invalidResponse('usage_extraction');
+    const inputTokens = value.input_tokens;
+    const outputTokens = value.output_tokens;
+    const totalTokens = value.total_tokens;
+    const tokenCounts = [inputTokens, outputTokens, totalTokens];
+    if (tokenCounts.some(count => typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)) {
+        throw invalidResponse('usage_extraction');
+    }
+    return { inputTokens: inputTokens, outputTokens: outputTokens, totalTokens: totalTokens };
 }
 function isAbortError(error) {
     return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
@@ -51,21 +159,21 @@ async function nextWithAbort(next, signal) {
 }
 function mapProviderError(error) {
     if (error instanceof APIConnectionTimeoutError) {
-        return new OpenAiTextGenerationError('timeout', 'Text generation provider timed out');
+        return new OpenAiTextGenerationError('timeout', 'Text generation provider timed out', undefined, 'provider_iterator');
     }
     if (error instanceof AuthenticationError) {
-        return new OpenAiTextGenerationError('authentication', 'Text generation provider rejected its credentials');
+        return new OpenAiTextGenerationError('authentication', 'Text generation provider rejected its credentials', undefined, 'provider_iterator');
     }
     if (error instanceof RateLimitError) {
-        return new OpenAiTextGenerationError('rate_limit', 'Text generation provider rate limit was reached');
+        return new OpenAiTextGenerationError('rate_limit', 'Text generation provider rate limit was reached', undefined, 'provider_iterator');
     }
     if (error instanceof APIConnectionError) {
-        return new OpenAiTextGenerationError('connection', 'Text generation provider could not be reached');
+        return new OpenAiTextGenerationError('connection', 'Text generation provider could not be reached', undefined, 'provider_iterator');
     }
     if (error instanceof APIError) {
-        return new OpenAiTextGenerationError('provider', 'Text generation provider returned an error');
+        return new OpenAiTextGenerationError('provider', 'Text generation provider returned an error', undefined, 'provider_iterator');
     }
-    return new OpenAiTextGenerationError('provider', 'Text generation provider failed unexpectedly');
+    return new OpenAiTextGenerationError('provider', 'Text generation provider failed unexpectedly', undefined, 'provider_iterator');
 }
 export class OpenAiTextGenerator {
     configuration;
@@ -146,47 +254,57 @@ export class OpenAiTextGenerator {
                 }
                 if (step.done)
                     break;
-                const event = step.value;
-                if (event.sequence_number <= lastSequenceNumber)
+                const { record: event, type, sequenceNumber } = eventRecord(step.value);
+                if (sequenceNumber <= lastSequenceNumber)
                     continue;
-                lastSequenceNumber = event.sequence_number;
-                if (event.type === 'response.output_text.delta') {
+                lastSequenceNumber = sequenceNumber;
+                if (type === 'response.output_text.delta') {
+                    if (typeof event.delta !== 'string')
+                        throw invalidResponse('event_validation');
                     if (!event.delta)
                         continue;
                     accumulatedText += event.delta;
                     yield { type: 'delta', text: event.delta };
                     continue;
                 }
-                if (event.type === 'response.completed') {
-                    if (event.response.status !== 'completed' || event.response.error !== null) {
-                        const reason = event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
-                        throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', reason);
-                    }
-                    const text = event.response.output_text.trim();
-                    if (!text)
-                        throw new OpenAiTextGenerationError('empty_response', 'Text generation provider returned empty text');
+                if (type === 'response.completed') {
+                    if (!Object.hasOwn(event, 'response'))
+                        throw invalidResponse('event_validation');
+                    const { text, response } = extractCompletedText(event.response);
                     if (accumulatedText.trim() !== text) {
-                        throw new OpenAiTextGenerationError('invalid_response', 'Text generation stream did not match its final response');
+                        throw invalidResponse('final_text_validation', 'Text generation stream did not match its final response');
                     }
+                    const usage = validateUsage(response.usage);
                     completed = true;
-                    const usage = resultUsage(event.response);
                     yield { type: 'completed', result: { text, ...(usage ? { usage } : {}) } };
                     return;
                 }
-                if (event.type === 'response.failed') {
+                if (type === 'response.failed') {
+                    if (!isRecord(event.response) || event.response.status !== 'failed' || !Object.hasOwn(event.response, 'error')) {
+                        throw invalidResponse('event_validation');
+                    }
                     throw new OpenAiTextGenerationError('provider', 'Text generation provider failed the response');
                 }
-                if (event.type === 'response.incomplete') {
-                    const reason = event.response.incomplete_details?.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
+                if (type === 'response.incomplete') {
+                    if (!Object.hasOwn(event, 'response'))
+                        throw invalidResponse('event_validation');
+                    const reason = validateIncompleteReason(event.response);
                     throw new OpenAiTextGenerationError('incomplete_response', 'Text generation provider returned an incomplete response', reason);
                 }
-                if (event.type === 'error') {
-                    const code = event.code?.toLowerCase() ?? '';
+                if (type === 'error') {
+                    if (event.code !== undefined && event.code !== null && typeof event.code !== 'string')
+                        throw invalidResponse('event_validation');
+                    const code = typeof event.code === 'string' ? event.code.toLowerCase() : '';
                     const kind = code.includes('auth') || code.includes('api_key') ? 'authentication'
                         : code.includes('rate_limit') ? 'rate_limit' : 'provider';
                     throw new OpenAiTextGenerationError(kind, 'Text generation provider emitted an error');
                 }
             }
+        }
+        catch (error) {
+            if (error instanceof OpenAiTextGenerationError)
+                throw error;
+            throw invalidResponse('event_validation');
         }
         finally {
             if (!completed) {

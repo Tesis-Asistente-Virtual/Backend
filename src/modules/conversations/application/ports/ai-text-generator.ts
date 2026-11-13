@@ -34,6 +34,11 @@ export type AiTextGenerationFailureKind =
   | 'provider';
 
 export type AiTextIncompleteReason = 'max_output_tokens' | 'other';
+export type AiTextGenerationFailureStage =
+  | 'provider_iterator'
+  | 'event_validation'
+  | 'final_text_validation'
+  | 'usage_extraction';
 
 /** Provider-neutral failure categories; provider messages and identifiers are intentionally omitted. */
 export class AiTextGenerationError extends Error {
@@ -41,6 +46,7 @@ export class AiTextGenerationError extends Error {
     readonly kind: AiTextGenerationFailureKind,
     message: string,
     readonly incompleteReason?: AiTextIncompleteReason,
+    readonly failureStage?: AiTextGenerationFailureStage,
   ) {
     super(message);
     this.name = 'AiTextGenerationError';

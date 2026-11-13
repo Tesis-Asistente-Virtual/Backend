@@ -31,6 +31,16 @@ function completed(text: string, sequence: number): OpenAI.Responses.ResponseStr
   return { type: 'response.completed', response: completedResponse(text), sequence_number: sequence };
 }
 
+function completedResponseWithoutOutputText(output: unknown, usage: unknown = null): OpenAI.Responses.Response {
+  const response: Record<string, unknown> = { ...completedResponse(''), output, usage };
+  delete response.output_text;
+  return response as unknown as OpenAI.Responses.Response;
+}
+
+function assistantOutputTextPart(text: string): OpenAI.Responses.ResponseOutputText {
+  return { type: 'output_text', text, annotations: [], logprobs: [] };
+}
+
 function streamHarness(stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>) {
   const create = vi.fn(async (_body: OpenAI.Responses.ResponseCreateParamsStreaming, _options?: OpenAI.RequestOptions) => stream);
   const client = { responses: { create } } as unknown as Pick<OpenAI, 'responses'>;
@@ -83,6 +93,30 @@ describe('OpenAiTextGenerator streaming', () => {
     ]);
   });
 
+  it('extracts text from ordered assistant output parts when output_text is absent', async () => {
+    const response = completedResponseWithoutOutputText([
+      { id: 'reasoning-item', type: 'reasoning', summary: [] },
+      {
+        id: 'assistant-message', type: 'message', role: 'assistant', status: 'completed',
+        content: [assistantOutputTextPart('Hola'), assistantOutputTextPart(', '), assistantOutputTextPart('mundo.')],
+      },
+      { id: 'tool-item', type: 'function_call', name: 'not-visible', arguments: '{}' },
+    ]);
+    async function* events() {
+      yield delta('Hola', 1);
+      yield delta(', ', 2);
+      yield delta('mundo.', 3);
+      yield { type: 'response.completed', response, sequence_number: 4 } as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const { generator } = streamHarness(events());
+    await expect(consume(generator.streamText(request))).resolves.toEqual([
+      { type: 'delta', text: 'Hola' },
+      { type: 'delta', text: ', ' },
+      { type: 'delta', text: 'mundo.' },
+      { type: 'completed', result: { text: 'Hola, mundo.' } },
+    ]);
+  });
+
   it('rejects an iterator that ends without response.completed', async () => {
     async function* events() { yield delta('Partial text', 1); }
     const { generator } = streamHarness(events());
@@ -117,7 +151,27 @@ describe('OpenAiTextGenerator streaming', () => {
 
     async function* mismatchedFinal() { yield delta('partial', 1); yield completed('different final text', 2); }
     const mismatched = streamHarness(mismatchedFinal());
-    await expect(consume(mismatched.generator.streamText(request))).rejects.toMatchObject({ kind: 'invalid_response' });
+    await expect(consume(mismatched.generator.streamText(request))).rejects.toMatchObject({ kind: 'invalid_response', failureStage: 'final_text_validation' });
+
+    const errorResponse = { ...completedResponse('same text'), error: { code: 'server_error', message: 'private provider detail' } } as unknown as OpenAI.Responses.Response;
+    async function* terminalError() {
+      yield delta('same text', 1);
+      yield { type: 'response.completed', response: errorResponse, sequence_number: 2 } as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const terminalErrorStream = streamHarness(terminalError());
+    const terminalErrorEvents: AiTextStreamEvent[] = [];
+    const terminalErrorFailure = await consumeUntilError(terminalErrorStream.generator.streamText(request), terminalErrorEvents);
+    expect(terminalErrorFailure).toMatchObject({ kind: 'incomplete_response', failureStage: 'final_text_validation' });
+    expect((terminalErrorFailure as Error).message).not.toContain('private provider detail');
+    expect(terminalErrorEvents.some(event => event.type === 'completed')).toBe(false);
+
+    const invalidOutputTextResponse = { ...completedResponse('same text'), output_text: 42 } as unknown as OpenAI.Responses.Response;
+    async function* invalidOutputText() {
+      yield delta('same text', 1);
+      yield { type: 'response.completed', response: invalidOutputTextResponse, sequence_number: 2 } as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const invalidOutputTextStream = streamHarness(invalidOutputText());
+    await expect(consume(invalidOutputTextStream.generator.streamText(request))).rejects.toMatchObject({ kind: 'invalid_response', failureStage: 'final_text_validation' });
 
     async function* wrongFinalStatus() {
       yield delta('some text', 1);
@@ -128,6 +182,71 @@ describe('OpenAiTextGenerator streaming', () => {
     }
     const wrongStatus = streamHarness(wrongFinalStatus());
     await expect(consume(wrongStatus.generator.streamText(request))).rejects.toMatchObject({ kind: 'incomplete_response' });
+  });
+
+  it('rejects malformed terminal events and malformed output instead of leaking TypeError', async () => {
+    async function* missingResponse() {
+      yield delta('Visible prefix', 1);
+      yield { type: 'response.completed', sequence_number: 2 } as unknown as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const missing = streamHarness(missingResponse());
+    const missingOutput: AiTextStreamEvent[] = [];
+    const missingFailure = await consumeUntilError(missing.generator.streamText(request), missingOutput);
+    expect(missingOutput).toEqual([{ type: 'delta', text: 'Visible prefix' }]);
+    expect(missingFailure).toMatchObject({ kind: 'invalid_response', failureStage: 'event_validation' });
+
+    const malformedResponse = completedResponseWithoutOutputText({ not: 'an output array' });
+    async function* malformedOutput() {
+      yield delta('Visible prefix', 1);
+      yield { type: 'response.completed', response: malformedResponse, sequence_number: 2 } as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const malformed = streamHarness(malformedOutput());
+    const malformedEvents: AiTextStreamEvent[] = [];
+    const malformedFailure = await consumeUntilError(malformed.generator.streamText(request), malformedEvents);
+    expect(malformedFailure).toMatchObject({ kind: 'invalid_response', failureStage: 'final_text_validation' });
+    expect(malformedEvents.some(event => event.type === 'completed')).toBe(false);
+
+    async function* malformedDelta() {
+      yield { type: 'response.output_text.delta', delta: { private: true }, sequence_number: 1 } as unknown as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const badDelta = streamHarness(malformedDelta());
+    await expect(consume(badDelta.generator.streamText(request))).rejects.toMatchObject({ kind: 'invalid_response', failureStage: 'event_validation' });
+  });
+
+  it('omits absent or null usage and rejects a raw iterator Error as a safe provider failure', async () => {
+    const absentUsageResponse = { ...completedResponse('Usable answer') } as unknown as Record<string, unknown>;
+    delete absentUsageResponse.usage;
+    async function* absentUsage() {
+      yield delta('Usable answer', 1);
+      yield { type: 'response.completed', response: absentUsageResponse, sequence_number: 2 } as unknown as OpenAI.Responses.ResponseStreamEvent;
+    }
+    const absent = streamHarness(absentUsage());
+    await expect(consume(absent.generator.streamText(request))).resolves.toEqual([
+      { type: 'delta', text: 'Usable answer' },
+      { type: 'completed', result: { text: 'Usable answer' } },
+    ]);
+
+    const nullUsageResponse = { ...completedResponse('Usable answer'), usage: null } as unknown as OpenAI.Responses.Response;
+    async function* nullUsage() {
+      yield delta('Usable answer', 1);
+      yield { type: 'response.completed', response: nullUsageResponse, sequence_number: 2 } as const;
+    }
+    const nullUsageGenerator = streamHarness(nullUsage());
+    await expect(consume(nullUsageGenerator.generator.streamText(request))).resolves.toEqual([
+      { type: 'delta', text: 'Usable answer' },
+      { type: 'completed', result: { text: 'Usable answer' } },
+    ]);
+
+    async function* rawIteratorFailure() {
+      yield delta('Visible prefix', 1);
+      throw new Error('private iterator detail');
+    }
+    const failedIterator = streamHarness(rawIteratorFailure());
+    const emitted: AiTextStreamEvent[] = [];
+    const failure = await consumeUntilError(failedIterator.generator.streamText(request), emitted);
+    expect(emitted).toEqual([{ type: 'delta', text: 'Visible prefix' }]);
+    expect(failure).toMatchObject({ kind: 'provider', failureStage: 'provider_iterator' });
+    expect((failure as Error).message).not.toContain('private iterator detail');
   });
 
   it('classifies max_output_tokens and unknown incomplete reasons without preserving provider payloads', async () => {

@@ -9,7 +9,11 @@ function generationRequest(messages, maxOutputTokens) {
 }
 function providerFailure(error) {
     if (error instanceof AiTextGenerationError) {
-        return { errorKind: error.kind, ...(error.incompleteReason ? { incompleteReason: error.incompleteReason } : {}) };
+        return {
+            errorKind: error.kind,
+            ...(error.incompleteReason ? { incompleteReason: error.incompleteReason } : {}),
+            ...(error.failureStage ? { failureStage: error.failureStage } : {}),
+        };
     }
     return { errorKind: 'unknown' };
 }
@@ -142,7 +146,13 @@ export class StreamConversationMessage {
             }
             if (failure) {
                 const cancelled = signal.aborted || failure.errorKind === 'cancelled';
-                this.report({ operation: 'conversation_stream', stage: cancelled ? 'cancelled' : failure.errorKind === 'transport' ? 'delta_write' : 'provider_stream', ...failure });
+                const stage = cancelled ? 'cancelled'
+                    : failure.errorKind === 'transport' ? 'delta_write'
+                        : failure.failureStage ?? 'provider_stream';
+                this.report({
+                    operation: 'conversation_stream', stage, errorKind: failure.errorKind,
+                    ...(failure.incompleteReason ? { incompleteReason: failure.incompleteReason } : {}),
+                });
                 await this.persistFailedMessage(accountId, conversationId);
                 if (!cancelled && failure.errorKind !== 'transport')
                     await this.emitError(callbacks, signal, 'generation_failed');

@@ -1,8 +1,9 @@
-import type { AiTextGenerationFailureKind, AiTextIncompleteReason } from './ai-text-generator.js';
+import type { AiTextGenerationFailureKind, AiTextGenerationFailureStage, AiTextIncompleteReason } from './ai-text-generator.js';
 
 export type ConversationStreamFailureStage =
   | 'context_read'
   | 'provider_stream'
+  | AiTextGenerationFailureStage
   | 'delta_write'
   | 'assistant_persistence'
   | 'failure_persistence'

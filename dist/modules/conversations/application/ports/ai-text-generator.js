@@ -2,10 +2,12 @@
 export class AiTextGenerationError extends Error {
     kind;
     incompleteReason;
-    constructor(kind, message, incompleteReason) {
+    failureStage;
+    constructor(kind, message, incompleteReason, failureStage) {
         super(message);
         this.kind = kind;
         this.incompleteReason = incompleteReason;
+        this.failureStage = failureStage;
         this.name = 'AiTextGenerationError';
     }
 }
