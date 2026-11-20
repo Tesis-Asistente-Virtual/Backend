@@ -16,4 +16,4 @@ npm run db:migrate:test
 npm run test:integration
 ```
 
-Replace the placeholders with test-only credentials. The migration command reuses `./drizzle` and validates the destination before connecting. The integration suite deletes only accounts created with its unique run identifiers; it never drops databases, tables, or truncates data. Keep `npm test` for unit tests; it excludes this integration directory.
+Replace the placeholders with test-only credentials. The migration command reuses `./drizzle` and validates the destination before connecting. The integration suite deletes only accounts created with its unique run identifiers; it never drops databases, tables, or truncates data. Consent notice fixtures are labeled as integration-only non-legal text and retained in `tesis_test_db`, because the immutability trigger correctly prevents deleting a published notice. The suite reuses existing published notices where possible and never changes a pre-existing notice. Keep `npm test` for unit tests; it excludes this integration directory.

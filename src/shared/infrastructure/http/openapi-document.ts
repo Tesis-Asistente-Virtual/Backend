@@ -7,6 +7,7 @@ import { updateMyProfileSchema } from '../../../modules/users/interfaces/rest/va
 import { authenticationPaths } from '../../../modules/authentication/interfaces/rest/openapi.js';
 import { usersPaths } from '../../../modules/users/interfaces/rest/openapi.js';
 import { conversationsPaths, conversationsSchemas } from '../../../modules/conversations/interfaces/rest/openapi.js';
+import { consentPaths, consentSchemas } from '../../../modules/consent/interfaces/rest/openapi.js';
 
 const profile = z.object({ firstName: z.string().nullable(), lastName: z.string().nullable(), phone: z.string().nullable() });
 const errorResponse = z.object({ error: z.string() });
@@ -20,11 +21,12 @@ export const openApiDocument = {
     description: 'API REST para autenticación y gestión de perfiles de estudiantes universitarios.',
   },
   servers: [{ url: 'http://localhost:3000', description: 'Servidor local' }],
-  tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Conversations' }, { name: 'Health' }],
+  tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Conversations' }, { name: 'Consent & Privacy' }, { name: 'Health' }],
   paths: {
     ...authenticationPaths,
     ...usersPaths,
     ...conversationsPaths,
+    ...consentPaths,
     '/health': { get: { tags: ['Health'], summary: 'Verificar disponibilidad del servicio', responses: { '200': { description: 'Servicio disponible', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'ok' } }, required: ['status'] } } } } } } },
   },
   components: {
@@ -40,6 +42,7 @@ export const openApiDocument = {
       UpdateMyProfileRequest: schema(updateMyProfileSchema),
       ErrorResponse: schema(errorResponse),
       ...conversationsSchemas,
+      ...consentSchemas,
     },
     responses: {
       BadRequest: { description: 'Solicitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Invalid request data' } } } },

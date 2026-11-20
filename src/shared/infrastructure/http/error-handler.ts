@@ -7,6 +7,8 @@ import { ProfileNotFound } from '../../../modules/users/application/internal/que
 import { ConversationNotFound } from '../../../modules/conversations/application/internal/query-services/get-conversation.js';
 import { AssistantGenerationUnavailable, ConversationArchived, InvalidConversationMessage } from '../../../modules/conversations/application/internal/command-services/send-conversation-message.js';
 import { ConversationTurnInProgress } from '../../../modules/conversations/application/ports/conversation-turn-lock.js';
+import { ConsentNoticeUnavailable } from '../../../modules/consent/application/internal/command-services/record-my-consent-decision.js';
+import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/model/consent-errors.js';
 
 function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -45,6 +47,8 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(400).json({ error: 'Invalid conversation message' });
     return;
   }
+  if (err instanceof ConsentNoticeUnavailable) { res.status(404).json({ error: 'Consent notice is unavailable' }); return; }
+  if (err instanceof ConsentIdempotencyConflict) { res.status(409).json({ error: 'Consent decision conflicts with an earlier request' }); return; }
   if (err instanceof AssistantGenerationUnavailable) {
     res.status(503).json({ error: 'Text generation is temporarily unavailable' });
     return;

@@ -6,6 +6,7 @@ import { sessionRouter } from './modules/authentication/interfaces/rest/session-
 import { usersRouter } from './modules/users/interfaces/rest/users-routes.js';
 import { conversationsRouter } from './modules/conversations/interfaces/rest/conversations-routes.js';
 import { openApiRouter } from './shared/infrastructure/http/openapi-routes.js';
+import { consentRouter } from './modules/consent/interfaces/rest/consent-routes.js';
 export const app = express();
 app.use(express.json());
 app.use(openApiRouter);
@@ -15,4 +16,5 @@ app.use('/api/v1/auth', signInRouter);
 app.use('/api/v1/auth', sessionRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/conversations', conversationsRouter);
+app.use('/api/v1/consents', consentRouter);
 app.use(errorHandler);
