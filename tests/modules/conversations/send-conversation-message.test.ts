@@ -33,6 +33,7 @@ function harness(options: { status?: 'active' | 'archived' | null; providerError
       created.push(row);
       return row;
     }),
+    findByIdsForOwner: vi.fn(async () => []),
     listByConversationForOwner: vi.fn(async (_id: string, _ownerId: string, pagination: Pagination): Promise<Page<ConversationMessage>> => ({ items: [], ...pagination, hasMore: false })),
     listRecentCompletedForOwner: vi.fn(async (id: string, ownerId: string, _limit: number) => id === conversationId && ownerId === accountId ? options.recent ?? [] : []),
   };

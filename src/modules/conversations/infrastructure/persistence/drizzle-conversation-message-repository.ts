@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { createConversationMessage, messageRoles, messageStatuses, orderConversationMessages, type ConversationMessage, type MessageRole, type MessageStatus, type NewConversationMessage } from '../../domain/model/conversation-message.js';
@@ -22,6 +22,27 @@ export class DrizzleConversationMessageRepository implements ConversationMessage
 
     const [row] = await this.db.insert(conversationMessages).values(input).returning();
     return row ? toDomain(row) : null;
+  }
+
+  async findByIdsForOwner(conversationId: string, accountId: string, messageIds: readonly string[]): Promise<ConversationMessage[]> {
+    if (messageIds.length === 0) return [];
+    const rows = await this.db.select({
+      id: conversationMessages.id,
+      conversationId: conversationMessages.conversationId,
+      role: conversationMessages.role,
+      content: conversationMessages.content,
+      status: conversationMessages.status,
+      createdAt: conversationMessages.createdAt,
+    }).from(conversationMessages)
+      .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+      .where(and(
+        eq(conversationMessages.conversationId, conversationId),
+        eq(conversations.accountId, accountId),
+        eq(conversationMessages.status, 'completed'),
+        inArray(conversationMessages.id, [...messageIds]),
+      ))
+      .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id));
+    return rows.map(toDomain);
   }
 
   async listByConversationForOwner(conversationId: string, accountId: string, pagination: Pagination): Promise<Page<ConversationMessage>> {

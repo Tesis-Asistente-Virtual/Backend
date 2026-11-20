@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { createConversationMessage, messageRoles, messageStatuses, orderConversationMessages } from '../../domain/model/conversation-message.js';
 import { conversationMessages, conversations } from './schema.js';
 function toDomain(row) {
@@ -20,6 +20,22 @@ export class DrizzleConversationMessageRepository {
             return null;
         const [row] = await this.db.insert(conversationMessages).values(input).returning();
         return row ? toDomain(row) : null;
+    }
+    async findByIdsForOwner(conversationId, accountId, messageIds) {
+        if (messageIds.length === 0)
+            return [];
+        const rows = await this.db.select({
+            id: conversationMessages.id,
+            conversationId: conversationMessages.conversationId,
+            role: conversationMessages.role,
+            content: conversationMessages.content,
+            status: conversationMessages.status,
+            createdAt: conversationMessages.createdAt,
+        }).from(conversationMessages)
+            .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
+            .where(and(eq(conversationMessages.conversationId, conversationId), eq(conversations.accountId, accountId), eq(conversationMessages.status, 'completed'), inArray(conversationMessages.id, [...messageIds])))
+            .orderBy(asc(conversationMessages.createdAt), asc(conversationMessages.id));
+        return rows.map(toDomain);
     }
     async listByConversationForOwner(conversationId, accountId, pagination) {
         const rows = await this.db.select({
