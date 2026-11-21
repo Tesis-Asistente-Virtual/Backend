@@ -1,4 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
+import express from 'express';
+import { createServer } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, lte } from 'drizzle-orm';
 import { authAccounts } from '../../src/modules/authentication/infrastructure/persistence/schema.js';
@@ -11,8 +13,12 @@ import { conversations, conversationMessages } from '../../src/modules/conversat
 import { DrizzleConversationRepository } from '../../src/modules/conversations/infrastructure/persistence/drizzle-conversation-repository.js';
 import { DrizzleConversationMessageRepository } from '../../src/modules/conversations/infrastructure/persistence/drizzle-conversation-message-repository.js';
 import type { ConversationSignalExtractor, ExtractConversationSignalsInput } from '../../src/modules/conversational-processing/application/ports/conversation-signal-extractor.js';
-import { ExtractAuthorizedConversationSignals, SignalConsentRequired, SignalConversationNotFound, SignalMessageReferencesInvalid } from '../../src/modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
+import type { ConversationSignalExtraction } from '../../src/modules/conversational-processing/domain/model/signal-observation.js';
+import { ExtractAuthorizedConversationSignals, SignalAuthorizationUnavailable, SignalConsentRequired, SignalConversationNotFound, SignalMessageReferencesInvalid } from '../../src/modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
 import { connectTestDatabase } from './test-database.js';
+import { JwtAccessTokenService } from '../../src/modules/authentication/infrastructure/security/jwt-access-token-service.js';
+import { createConversationSignalExtractionRouter } from '../../src/modules/conversational-processing/interfaces/rest/conversation-signal-extraction-routes.js';
+import { errorHandler } from '../../src/shared/infrastructure/http/error-handler.js';
 
 const requiredPurposes = ['structured_signal_extraction', 'ai_conversation_processing'] as const;
 type TestDb = Awaited<ReturnType<typeof connectTestDatabase>>['db'];
@@ -136,12 +142,12 @@ describe('Authorized conversation signal extraction PostgreSQL integration', () 
     return id;
   }
 
-  function makeExtractor() {
+  function makeExtractor(createResult?: (input: ExtractConversationSignalsInput) => ConversationSignalExtraction) {
     const received: ExtractConversationSignalsInput[] = [];
     const extractor: ConversationSignalExtractor = {
       extract: async input => {
         received.push(input);
-        return { schemaVersion: '1.0', observations: [], missingInformation: [], clarificationQuestions: [] };
+        return createResult?.(input) ?? { schemaVersion: '1.0', observations: [], missingInformation: [], clarificationQuestions: [] };
       },
     };
     return { extractor, received };
@@ -293,7 +299,7 @@ describe('Authorized conversation signal extraction PostgreSQL integration', () 
     const { extractor, received } = makeExtractor();
     const failedConsent: ConsentPurposeChecker = { execute: async () => { throw new Error('test-only consent store failure'); } };
 
-    await expect(useCase(extractor, failedConsent).execute(accountId, { conversationId, messageIds: [messageId] })).rejects.toThrow('test-only consent store failure');
+    await expect(useCase(extractor, failedConsent).execute(accountId, { conversationId, messageIds: [messageId] })).rejects.toBeInstanceOf(SignalAuthorizationUnavailable);
     expect(received).toHaveLength(0);
   });
 
@@ -320,5 +326,114 @@ describe('Authorized conversation signal extraction PostgreSQL integration', () 
     expect(calls.get('structured_signal_extraction')).toBe(2);
     expect(calls.get('ai_conversation_processing')).toBe(1);
     expect(received).toHaveLength(0);
+  });
+
+  it('serves explicit HTTP extraction with JWT, owner isolation, double consent, and no persistence', async () => {
+    const ownerId = await createAccount();
+    const otherId = await createAccount();
+    const noConsentId = await createAccount();
+    await grantBoth(ownerId);
+    await grantBoth(otherId);
+    const conversationId = await createConversation(ownerId);
+    const messageId = await insertMessage({ conversationId, role: 'user', content: 'Cansancio durante la semana sintética de exámenes.', createdAt: new Date() });
+    const otherConversationId = await createConversation(otherId);
+    const otherMessageId = await insertMessage({ conversationId: otherConversationId, role: 'user', content: 'Synthetic withdrawn consent fixture', createdAt: new Date() });
+    const noConsentConversationId = await createConversation(noConsentId);
+    const noConsentMessageId = await insertMessage({ conversationId: noConsentConversationId, role: 'user', content: 'Synthetic no consent fixture', createdAt: new Date() });
+    await decision(otherId, 'structured_signal_extraction', 'withdrawn');
+    const before = await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, conversationId));
+    const { extractor, received } = makeExtractor(input => ({
+      schemaVersion: '1.0',
+      observations: [{
+        evidence: 'reported',
+        manifestation: { status: 'reported', value: 'Cansancio durante la semana sintética de exámenes.' },
+        possibleDimensions: ['stress'],
+        duration: { status: 'not_reported' },
+        frequency: { status: 'not_assessed' },
+        intensity: { status: 'not_assessed' },
+        contexts: [{ domain: 'academic', evidence: { status: 'reported', value: 'Semana de exámenes sintética.' } }],
+        functionalImpact: { status: 'not_assessed' },
+        sourceMessageIds: [input.messages[0]!.messageId],
+      }],
+      missingInformation: [
+        { field: 'duration', reason: 'not_reported' },
+        { field: 'frequency', reason: 'not_assessed' },
+      ],
+      clarificationQuestions: ['¿Desde cuándo ocurre?'],
+    }));
+    const service = useCase(extractor);
+    const jwt = new JwtAccessTokenService('integration-test-jwt-secret-at-least-32-bytes', 'integration-test', 'integration-client', 300);
+    const app = express();
+    app.use(express.json());
+    app.use('/api/v1/conversations', createConversationSignalExtractionRouter(service, jwt));
+    app.use(errorHandler);
+    const server = createServer(app);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('HTTP integration server did not bind');
+    const send = async (token: string | undefined, body: unknown, targetConversationId = conversationId, action: 'extract' | 'results' = 'extract') => fetch(
+      `http://127.0.0.1:${address.port}/api/v1/conversations/${targetConversationId}/signals/${action}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(body),
+      });
+
+    try {
+      expect((await send(undefined, { messageIds: [messageId] })).status).toBe(401);
+      const ownerToken = await jwt.issue(ownerId);
+      const otherToken = await jwt.issue(otherId);
+      const noConsentToken = await jwt.issue(noConsentId);
+      // A foreign conversation and a nonexistent one remain indistinguishable (404).
+      expect((await send(otherToken, { messageIds: [messageId] })).status).toBe(404);
+      expect((await send(otherToken, { messageIds: [messageId] }, conversationId, 'results')).status).toBe(404);
+      expect((await send(ownerToken, { messageIds: [messageId] }, randomUUID())).status).toBe(404);
+      // These two requests use conversations owned by the token subject, so consent is evaluated.
+      expect((await send(otherToken, { messageIds: [otherMessageId] }, otherConversationId)).status).toBe(403);
+      expect((await send(noConsentToken, { messageIds: [noConsentMessageId] }, noConsentConversationId)).status).toBe(403);
+      expect((await send(otherToken, { messageIds: [otherMessageId] }, otherConversationId, 'results')).status).toBe(403);
+      expect((await send(noConsentToken, { messageIds: [noConsentMessageId] }, noConsentConversationId, 'results')).status).toBe(403);
+      expect((await send(ownerToken, { messageIds: [messageId], accountId: otherId })).status).toBe(400);
+      expect(received).toHaveLength(0);
+      const response = await send(ownerToken, { messageIds: [messageId] });
+      expect(response.status).toBe(200);
+      const extractionResponse = await response.json() as Record<string, unknown>;
+      expect(extractionResponse).toMatchObject({
+        status: 'completed', schemaVersion: '1.0',
+        observations: [{ evidence: 'reported', possibleDimensions: ['stress'] }],
+        missingInformation: [{ field: 'duration', reason: 'not_reported' }, { field: 'frequency', reason: 'not_assessed' }],
+        clarificationQuestions: ['¿Desde cuándo ocurre?'],
+      });
+      expect(Object.keys(extractionResponse).sort()).toEqual(['clarificationQuestions', 'missingInformation', 'observations', 'schemaVersion', 'status']);
+      expect(received).toHaveLength(1);
+      expect(received[0]?.messages).toEqual([{ messageId, role: 'user', content: 'Cansancio durante la semana sintética de exámenes.' }]);
+      const resultResponse = await send(ownerToken, { messageIds: [messageId] }, conversationId, 'results');
+      expect(resultResponse.status).toBe(200);
+      const result = await resultResponse.json() as Record<string, unknown>;
+      expect(result).toMatchObject({
+        status: 'completed', conversationId, schemaVersion: '1.0', extractorVersion: '1.0.0',
+        sourceMessageIds: [messageId],
+        observations: [{ evidence: 'reported', manifestation: { status: 'reported', value: 'Cansancio durante la semana sintética de exámenes.' } }],
+        missingInformation: [{ field: 'duration', reason: 'not_reported' }, { field: 'frequency', reason: 'not_assessed' }],
+        clarificationQuestions: ['¿Desde cuándo ocurre?'],
+        summary: {
+          descriptiveStatus: 'observations_available',
+          reportedFacts: [
+            { observationIndex: 0, field: 'manifestation', sourceMessageIds: [messageId] },
+            { observationIndex: 0, field: 'context', contextDomain: 'academic', sourceMessageIds: [messageId] },
+          ],
+        },
+      });
+      expect(result).not.toHaveProperty('accountId');
+      expect(received).toHaveLength(2);
+      const repeatedResponse = await send(ownerToken, { messageIds: [messageId] }, conversationId, 'results');
+      expect(repeatedResponse.status).toBe(200);
+      const repeatedResult = await repeatedResponse.json() as Record<string, unknown>;
+      expect(repeatedResult.id).not.toBe(result.id);
+      expect(received).toHaveLength(3);
+      const after = await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, conversationId));
+      expect(after).toHaveLength(before.length);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
 });

@@ -3,7 +3,6 @@ import type { RequestOptions } from 'openai/internal/request-options.js';
 import { describe, expect, it, vi } from 'vitest';
 import { signalExtractionInstructions, signalExtractionInstructionsVersion } from '../../../src/modules/conversational-processing/application/signal-extraction-instructions.js';
 import { ConversationSignalExtractionError, type ExtractConversationSignalsInput } from '../../../src/modules/conversational-processing/application/ports/conversation-signal-extractor.js';
-import { signalSchemaVersion } from '../../../src/modules/conversational-processing/domain/model/signal-observation.js';
 import { OpenAiConfigurationError, type OpenAiEnvironmentSettings } from '../../../src/modules/conversations/infrastructure/openai/openai-configuration.js';
 import { OpenAiConversationSignalExtractor } from '../../../src/modules/conversational-processing/infrastructure/openai/openai-conversation-signal-extractor.js';
 
@@ -78,7 +77,7 @@ describe('OpenAiConversationSignalExtractor', () => {
   });
 
   it('uses versioned non-diagnostic instructions', () => {
-    expect(signalExtractionInstructionsVersion).toBe(signalSchemaVersion);
+    expect(signalExtractionInstructionsVersion).toBe('1.0.0');
     expect(signalExtractionInstructions).toContain('no constituye un trastorno');
     expect(signalExtractionInstructions).toContain('not_reported significa solamente');
     expect(signalExtractionInstructions).toContain('No determines niveles de seguridad');

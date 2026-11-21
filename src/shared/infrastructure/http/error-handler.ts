@@ -13,6 +13,14 @@ import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/mode
 import { PreliminaryAssessmentError } from '../../../modules/preliminary-assessment/domain/model/assessment-errors.js';
 import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-errors.js';
 import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
+import {
+  SignalAuthorizationUnavailable,
+  SignalConsentRequired,
+  SignalConversationNotFound,
+  SignalExtractionUnavailable,
+  SignalMessageReferencesInvalid,
+} from '../../../modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
+import { ConversationSignalExtractionError } from '../../../modules/conversational-processing/application/ports/conversation-signal-extractor.js';
 
 function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -41,6 +49,32 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   if (err instanceof ConversationNotFound) {
     res.status(404).json({ error: 'Conversation not found' });
+    return;
+  }
+  if (err instanceof SignalConversationNotFound) {
+    res.status(404).json({ error: 'Conversation not found' });
+    return;
+  }
+  if (err instanceof SignalMessageReferencesInvalid) {
+    res.status(400).json({ error: 'Conversation message references are invalid' });
+    return;
+  }
+  if (err instanceof SignalConsentRequired) {
+    res.status(403).json({ error: 'Current consent is required for conversation signal extraction' });
+    return;
+  }
+  if (err instanceof SignalAuthorizationUnavailable) {
+    res.status(503).json({ error: 'Consent status is temporarily unavailable' });
+    return;
+  }
+  if (err instanceof SignalExtractionUnavailable) {
+    res.status(503).json({ error: 'Conversation signal extraction is temporarily unavailable' });
+    return;
+  }
+  if (err instanceof ConversationSignalExtractionError) {
+    if (err.kind === 'invalid_input') { res.status(400).json({ error: 'Invalid extraction request' }); return; }
+    if (err.kind === 'cancelled') { res.status(503).json({ error: 'Conversation signal extraction was interrupted' }); return; }
+    res.status(503).json({ error: 'Conversation signal extraction is temporarily unavailable' });
     return;
   }
   if (err instanceof ConversationArchived || err instanceof ConversationTurnInProgress) {

@@ -13,6 +13,7 @@ import {
 } from '../../../src/modules/conversational-processing/application/ports/conversation-signal-extractor.js';
 import {
   ExtractAuthorizedConversationSignals,
+  SignalAuthorizationUnavailable,
   SignalConsentRequired,
   SignalConversationNotFound,
   SignalMessageReferencesInvalid,
@@ -171,7 +172,7 @@ describe('ExtractAuthorizedConversationSignals', () => {
 
   it('propagates consent lookup failures and never treats them as a grant', async () => {
     const h = harness({ consentError: new Error('database unavailable') });
-    await expect(h.useCase.execute(accountId, request)).rejects.toThrow('database unavailable');
+    await expect(h.useCase.execute(accountId, request)).rejects.toBeInstanceOf(SignalAuthorizationUnavailable);
     expect(h.messageRepository.findByIdsForOwner).not.toHaveBeenCalled();
     expect(h.extractor.extract).not.toHaveBeenCalled();
   });

@@ -7,10 +7,10 @@ import swaggerUi from 'swagger-ui-express';
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all thirty-six operations', () => {
+  it('generates OpenAPI 3.0 documentation for all thirty-eight operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(36);
+    expect(operations).toHaveLength(38);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -20,6 +20,8 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages/stream');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/signals/extract');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/signals/results');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/notices');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/me');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/me/decisions');
@@ -61,6 +63,11 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].get.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].post.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages/stream'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/conversations/{id}/signals/extract'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/conversations/{id}/signals/results'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.components.schemas).toHaveProperty('ExtractConversationSignalsRequest');
+    expect(openApiDocument.components.schemas).toHaveProperty('ConversationSignalExtractionResponse');
+    expect(openApiDocument.components.schemas).toHaveProperty('GenerateConversationSignalResultResponse');
   });
   it('marks every preliminary assessment operation as Bearer protected', () => {
     for (const [path, item] of Object.entries(openApiDocument.paths).filter(([path]) => path.startsWith('/api/v1/preliminary-assessments'))) {

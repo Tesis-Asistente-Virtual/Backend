@@ -26,6 +26,14 @@ export class SignalConsentRequired extends Error {
   constructor() { super('Required consent is not granted'); this.name = 'SignalConsentRequired'; }
 }
 
+export class SignalAuthorizationUnavailable extends Error {
+  constructor() { super('Signal extraction authorization is unavailable'); this.name = 'SignalAuthorizationUnavailable'; }
+}
+
+export class SignalExtractionUnavailable extends Error {
+  constructor() { super('Signal extraction is not configured'); this.name = 'SignalExtractionUnavailable'; }
+}
+
 export class SignalMessageReferencesInvalid extends Error {
   constructor() { super('Conversation message references are invalid'); this.name = 'SignalMessageReferencesInvalid'; }
 }
@@ -82,9 +90,19 @@ export class ExtractAuthorizedConversationSignals {
   }
 
   private async assertRequiredConsents(accountId: string): Promise<void> {
-    const structuredExtractionGranted = await this.consent.execute(accountId, 'structured_signal_extraction');
+    let structuredExtractionGranted: boolean;
+    try {
+      structuredExtractionGranted = await this.consent.execute(accountId, 'structured_signal_extraction');
+    } catch {
+      throw new SignalAuthorizationUnavailable();
+    }
     if (!structuredExtractionGranted) throw new SignalConsentRequired();
-    const aiProcessingGranted = await this.consent.execute(accountId, 'ai_conversation_processing');
+    let aiProcessingGranted: boolean;
+    try {
+      aiProcessingGranted = await this.consent.execute(accountId, 'ai_conversation_processing');
+    } catch {
+      throw new SignalAuthorizationUnavailable();
+    }
     if (!aiProcessingGranted) throw new SignalConsentRequired();
   }
 }
