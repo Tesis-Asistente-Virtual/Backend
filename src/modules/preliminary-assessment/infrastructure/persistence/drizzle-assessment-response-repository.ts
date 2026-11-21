@@ -1,13 +1,12 @@
-import { and, asc, desc, eq, lte } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { PreliminaryAssessmentError } from '../../domain/model/assessment-errors.js';
 import { assessmentResponseSchema, validateResponseForInstrument, type AssessmentResponse } from '../../domain/model/assessment-response.js';
 import { isInstrumentAvailable, parseInstrumentVersion } from '../../domain/model/instrument.js';
 import type { AssessmentResponseRepository } from '../../domain/repositories/assessment-response-repository.js';
-import { accountConsentEvents, consentNoticeVersions } from '../../../consent/infrastructure/persistence/schema.js';
-import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
 import { assessmentAnswers, assessmentInstrumentQuestions, assessmentInstrumentVersions, preliminaryAssessments } from './schema.js';
+import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
 
 function toDomain(row: typeof assessmentAnswers.$inferSelect): AssessmentResponse {
   const parsed = assessmentResponseSchema.safeParse({
@@ -31,27 +30,17 @@ export class DrizzleAssessmentResponseRepository implements AssessmentResponseRe
     if (!parsed.success) throw new PreliminaryAssessmentError('invalid_response');
     const response = parsed.data;
     await this.db.transaction(async tx => {
-      await tx.select({ id: authAccounts.id }).from(authAccounts).where(eq(authAccounts.id, accountId)).for('share');
+      // Consent uses account -> notice lock ordering. Acquire both before the assessment row.
+      const currentNoticeId = await requireCurrentPreliminaryAssessmentConsent(tx, accountId, undefined, response.updatedAt);
       const [assessment] = await tx.select().from(preliminaryAssessments).where(and(
         eq(preliminaryAssessments.assessmentId, response.assessmentId),
         eq(preliminaryAssessments.accountId, accountId),
       )).for('update').limit(1);
       if (!assessment) throw new PreliminaryAssessmentError('assessment_not_found');
       if (assessment.status !== 'in_progress') throw new PreliminaryAssessmentError('assessment_closed');
+      if (assessment.consentNoticeVersionId !== currentNoticeId) throw new PreliminaryAssessmentError('consent_required');
       if (assessment.instrumentVersionId !== response.instrumentVersionId) throw new PreliminaryAssessmentError('instrument_version_mismatch');
       if (response.updatedAt < assessment.updatedAt) throw new PreliminaryAssessmentError('invalid_response');
-      const [notice] = await tx.select({ id: consentNoticeVersions.id }).from(consentNoticeVersions).where(and(
-        eq(consentNoticeVersions.id, assessment.consentNoticeVersionId),
-        eq(consentNoticeVersions.purpose, 'preliminary_assessment'),
-        eq(consentNoticeVersions.status, 'published'),
-        lte(consentNoticeVersions.effectiveAt, response.updatedAt),
-      )).limit(1);
-      const [latestConsent] = await tx.select().from(accountConsentEvents).where(and(
-        eq(accountConsentEvents.accountId, accountId), eq(accountConsentEvents.purpose, 'preliminary_assessment'),
-      )).orderBy(desc(accountConsentEvents.sequence)).limit(1);
-      if (!notice || latestConsent?.action !== 'granted' || latestConsent.noticeVersionId !== notice.id) {
-        throw new PreliminaryAssessmentError('consent_required');
-      }
 
       const [instrumentRow] = await tx.select().from(assessmentInstrumentVersions).where(eq(
         assessmentInstrumentVersions.instrumentVersionId, response.instrumentVersionId,

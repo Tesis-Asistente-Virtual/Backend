@@ -123,6 +123,37 @@ describe('PreliminaryAssessment application and REST validation', () => {
     expect(inProgressWithoutConsent.responses.saveForOwner).not.toHaveBeenCalled();
   });
 
+  it('preserves the transactional consent denial for resume and completion without reporting writes as successful', async () => {
+    const resume = harness({ assessment: aggregate('paused') });
+    resume.saved.mockRejectedValueOnce(new PreliminaryAssessmentError('consent_required'));
+    await expect(new ChangeAssessmentState(resume.assessments, resume.consent, () => at)
+      .execute(assessmentId, ownerId, 'resume')).rejects.toMatchObject({ code: 'consent_required' });
+    expect(resume.saved).toHaveBeenCalledTimes(1);
+
+    const contextual = { ...aggregate(), mode: 'conversational_contextual' as const, instrumentVersionId: null };
+    const completion = harness({ assessment: contextual });
+    completion.completed.mockRejectedValueOnce(new PreliminaryAssessmentError('consent_required'));
+    await expect(new CompletePreliminaryAssessment(completion.assessments, completion.results, completion.instruments, completion.consent, () => at)
+      .execute(assessmentId, ownerId)).rejects.toMatchObject({ code: 'consent_required' });
+    expect(completion.completed).toHaveBeenCalledTimes(1);
+    expect(completion.results.findByAssessmentForOwner).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on consent checker errors before resume or completion writes', async () => {
+    const resume = harness({ assessment: aggregate('paused') });
+    vi.mocked(resume.consent.getCurrentNoticeVersionId).mockRejectedValueOnce(new Error('private consent storage detail'));
+    await expect(new ChangeAssessmentState(resume.assessments, resume.consent, () => at)
+      .execute(assessmentId, ownerId, 'resume')).rejects.toThrow('private consent storage detail');
+    expect(resume.saved).not.toHaveBeenCalled();
+
+    const contextual = { ...aggregate(), mode: 'conversational_contextual' as const, instrumentVersionId: null };
+    const completion = harness({ assessment: contextual });
+    vi.mocked(completion.consent.getCurrentNoticeVersionId).mockRejectedValueOnce(new Error('private consent storage detail'));
+    await expect(new CompletePreliminaryAssessment(completion.assessments, completion.results, completion.instruments, completion.consent, () => at)
+      .execute(assessmentId, ownerId)).rejects.toThrow('private consent storage detail');
+    expect(completion.completed).not.toHaveBeenCalled();
+  });
+
   it('validates a response against the assigned approved version and delegates an owner-scoped save', async () => {
     const h = harness();
     const result = await new SubmitAssessmentResponse(h.assessments, h.responses, h.instruments, h.consent, () => at)

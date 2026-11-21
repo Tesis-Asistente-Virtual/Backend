@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { PreliminaryAssessmentError } from '../../domain/model/assessment-errors.js';
@@ -7,9 +7,8 @@ import type { PreliminaryAssessmentResult } from '../../domain/model/assessment-
 import { preliminaryAssessmentResultSchema } from '../../domain/model/assessment-result.js';
 import { restorePreliminaryAssessment, type PreliminaryAssessment } from '../../domain/model/preliminary-assessment.js';
 import type { PreliminaryAssessmentRepository } from '../../domain/repositories/preliminary-assessment-repository.js';
-import { accountConsentEvents, consentNoticeVersions } from '../../../consent/infrastructure/persistence/schema.js';
-import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
 import { assessmentAnswers, assessmentResults, preliminaryAssessments } from './schema.js';
+import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
 
 type AssessmentRow = typeof preliminaryAssessments.$inferSelect;
 type AnswerRow = typeof assessmentAnswers.$inferSelect;
@@ -70,20 +69,7 @@ export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssess
     const valid = restorePreliminaryAssessment(assessment);
     if (valid.status !== 'in_progress' || valid.responses.length > 0) throw new PreliminaryAssessmentError('invalid_assessment');
     await this.db.transaction(async tx => {
-      await tx.select({ id: authAccounts.id }).from(authAccounts).where(eq(authAccounts.id, valid.accountId)).for('share');
-      const [notice] = await tx.select({ id: consentNoticeVersions.id }).from(consentNoticeVersions).where(and(
-        eq(consentNoticeVersions.id, valid.consentNoticeVersionId),
-        eq(consentNoticeVersions.purpose, 'preliminary_assessment'),
-        eq(consentNoticeVersions.status, 'published'),
-        lte(consentNoticeVersions.effectiveAt, valid.startedAt),
-      )).limit(1);
-      const [latestConsent] = await tx.select().from(accountConsentEvents).where(and(
-        eq(accountConsentEvents.accountId, valid.accountId),
-        eq(accountConsentEvents.purpose, 'preliminary_assessment'),
-      )).orderBy(desc(accountConsentEvents.sequence)).limit(1);
-      if (!notice || latestConsent?.action !== 'granted' || latestConsent.noticeVersionId !== notice.id) {
-        throw new PreliminaryAssessmentError('consent_required');
-      }
+      await requireCurrentPreliminaryAssessmentConsent(tx, valid.accountId, valid.consentNoticeVersionId, valid.startedAt);
       await tx.insert(preliminaryAssessments).values(assessmentValues(valid));
     });
   }
@@ -124,14 +110,8 @@ export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssess
     const valid = restorePreliminaryAssessment(assessment);
     if (valid.accountId !== accountId || valid.status === 'completed' || valid.updatedAt <= expectedUpdatedAt) return false;
     return this.db.transaction(async tx => {
-      if (valid.status === 'in_progress' || valid.status === 'completed') {
-        await tx.select({ id: authAccounts.id }).from(authAccounts).where(eq(authAccounts.id, accountId)).for('share');
-        const [latestConsent] = await tx.select().from(accountConsentEvents).where(and(
-          eq(accountConsentEvents.accountId, accountId), eq(accountConsentEvents.purpose, 'preliminary_assessment'),
-        )).orderBy(desc(accountConsentEvents.sequence)).limit(1);
-        if (latestConsent?.action !== 'granted' || latestConsent.noticeVersionId !== valid.consentNoticeVersionId) {
-          throw new PreliminaryAssessmentError('consent_required');
-        }
+      if (valid.status === 'in_progress') {
+        await requireCurrentPreliminaryAssessmentConsent(tx, accountId, valid.consentNoticeVersionId, valid.updatedAt);
       }
       const [updated] = await tx.update(preliminaryAssessments).set(assessmentValues(valid)).where(and(
         eq(preliminaryAssessments.assessmentId, valid.assessmentId),
@@ -172,13 +152,7 @@ export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssess
       throw new PreliminaryAssessmentError('invalid_assessment');
     }
     return this.db.transaction(async tx => {
-      await tx.select({ id: authAccounts.id }).from(authAccounts).where(eq(authAccounts.id, accountId)).for('share');
-      const [latestConsent] = await tx.select().from(accountConsentEvents).where(and(
-        eq(accountConsentEvents.accountId, accountId), eq(accountConsentEvents.purpose, 'preliminary_assessment'),
-      )).orderBy(desc(accountConsentEvents.sequence)).limit(1);
-      if (latestConsent?.action !== 'granted' || latestConsent.noticeVersionId !== valid.consentNoticeVersionId) {
-        throw new PreliminaryAssessmentError('consent_required');
-      }
+      await requireCurrentPreliminaryAssessmentConsent(tx, accountId, valid.consentNoticeVersionId, valid.updatedAt);
       const [updated] = await tx.update(preliminaryAssessments).set(assessmentValues(valid)).where(and(
         eq(preliminaryAssessments.assessmentId, valid.assessmentId),
         eq(preliminaryAssessments.accountId, accountId),

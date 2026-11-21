@@ -20,6 +20,9 @@ import { connectTestDatabase } from './test-database.js';
 import { JwtAccessTokenService } from '../../src/modules/authentication/infrastructure/security/jwt-access-token-service.js';
 import { createPreliminaryAssessmentRouter } from '../../src/modules/preliminary-assessment/interfaces/rest/create-preliminary-assessment-router.js';
 import { errorHandler } from '../../src/shared/infrastructure/http/error-handler.js';
+import { ChangeAssessmentState } from '../../src/modules/preliminary-assessment/application/internal/command-services/change-assessment-state.js';
+import { CompletePreliminaryAssessment } from '../../src/modules/preliminary-assessment/application/internal/command-services/complete-preliminary-assessment.js';
+import type { PreliminaryAssessmentConsentAuthorizer } from '../../src/modules/preliminary-assessment/application/ports/preliminary-assessment-consent-authorizer.js';
 
 type TestDb = Awaited<ReturnType<typeof connectTestDatabase>>['db'];
 const fixtureInstrumentId = '00000000-0000-4000-8000-00000000a531';
@@ -82,6 +85,82 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     await db.update(consentNoticeVersions).set({ status: 'published' }).where(eq(consentNoticeVersions.id, id));
     draftNoticeIds.delete(id);
     return id;
+  }
+
+  async function insertDraftNotice(): Promise<string> {
+    const id = randomUUID();
+    const content = 'Synthetic replacement notice for isolated integration testing; not legal text.';
+    const [draft] = await db.insert(consentNoticeVersions).values({
+      id, purpose: 'preliminary_assessment', version: `test-${randomUUID().slice(0, 16)}`, content,
+      contentHash: createHash('sha256').update(content).digest('hex'),
+      effectiveAt: new Date(Date.now() - 60_000), status: 'draft',
+    }).returning({ id: consentNoticeVersions.id });
+    if (!draft) throw new Error('Could not create synthetic replacement notice');
+    draftNoticeIds.add(id);
+    return id;
+  }
+
+  async function supersedeNotice(previousNoticeId: string): Promise<string> {
+    const replacementId = await insertDraftNotice();
+    await db.transaction(async tx => {
+      await tx.update(consentNoticeVersions).set({ status: 'superseded' }).where(eq(consentNoticeVersions.id, previousNoticeId));
+      await tx.update(consentNoticeVersions).set({ status: 'published' }).where(eq(consentNoticeVersions.id, replacementId));
+    });
+    draftNoticeIds.delete(replacementId);
+    return replacementId;
+  }
+
+  async function waitForBlockedQuery(fragment: string): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await pool.query<{ pid: number }>(
+        `SELECT pid FROM pg_stat_activity
+         WHERE datname = current_database() AND pid <> pg_backend_pid()
+           AND wait_event_type = 'Lock' AND query ILIKE $1
+         LIMIT 1`,
+        [`%${fragment}%`],
+      );
+      if (result.rows.length > 0) return;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for a database lock involving ${fragment}`);
+  }
+
+  function consentAuthorizer(noticeId: string): PreliminaryAssessmentConsentAuthorizer {
+    return { getCurrentNoticeVersionId: async () => noticeId };
+  }
+
+  async function executeProtectedWrite(operation: 'resume' | 'complete' | 'response', ownerId: string, assessmentId: string, noticeId: string) {
+    const repository = new DrizzlePreliminaryAssessmentRepository(db);
+    const authorizer = consentAuthorizer(noticeId);
+    if (operation === 'resume') {
+      const current = await repository.findByIdForOwner(assessmentId, ownerId);
+      if (!current) throw new Error('Synthetic assessment fixture missing');
+      if (current.status === 'in_progress') {
+        const paused = pauseAssessment(current, new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)));
+        const saved = await repository.saveForOwner(paused, ownerId, current.updatedAt);
+        if (!saved) throw new Error('Could not pause synthetic assessment fixture');
+      }
+      return new ChangeAssessmentState(repository, authorizer).execute(assessmentId, ownerId, 'resume');
+    }
+    if (operation === 'response') {
+      const current = await repository.findByIdForOwner(assessmentId, ownerId);
+      if (!current?.instrumentVersionId) throw new Error('Synthetic instrument assessment fixture missing');
+      const selected = await new DrizzleInstrumentCatalog(db).findAvailableByVersionId(current.instrumentVersionId, new Date());
+      const question = selected?.questions[0];
+      if (!question) throw new Error('Synthetic fixture question missing');
+      const at = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
+      return new DrizzleAssessmentResponseRepository(db).saveForOwner({
+        assessmentId, instrumentVersionId: current.instrumentVersionId, questionId: question.id,
+        status: 'answered', answer: { type: 'text', value: 'Synthetic transactional consent response' }, createdAt: at, updatedAt: at,
+      }, ownerId);
+    }
+    return new CompletePreliminaryAssessment(
+      repository,
+      new DrizzleAssessmentResultRepository(db),
+      new DrizzleInstrumentCatalog(db),
+      authorizer,
+    ).execute(assessmentId, ownerId);
   }
 
   async function grantConsent(accountId: string): Promise<string> {
@@ -287,6 +366,124 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(await repository.findByIdForOwner(assessment.assessmentId, ownerId)).toMatchObject({ status: 'paused' });
   });
+
+  it.each(['resume', 'complete', 'response'] as const)(
+    'rejects %s and rolls back when the current consent notice was superseded before transactional revalidation',
+    async operation => {
+      const ownerId = await account();
+      const oldNoticeId = await grantConsent(ownerId);
+      const selected = operation === 'response' ? await instrument() : undefined;
+      const assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      await supersedeNotice(oldNoticeId);
+
+      await expect(executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId))
+        .rejects.toMatchObject({ code: 'consent_required' });
+      const stored = await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId);
+      expect(stored?.status).toBe(operation === 'resume' ? 'paused' : 'in_progress');
+      expect(await db.select().from(assessmentResults).where(eq(assessmentResults.assessmentId, assessment.assessmentId))).toHaveLength(0);
+      expect(await db.select().from(assessmentAnswers).where(eq(assessmentAnswers.assessmentId, assessment.assessmentId))).toHaveLength(0);
+    },
+  );
+
+  it.each(['resume', 'complete', 'response'] as const)(
+    'orders concurrent %s against notice supersession and denies the stale grant',
+    async operation => {
+      const ownerId = await account();
+      const oldNoticeId = await grantConsent(ownerId);
+      const selected = operation === 'response' ? await instrument() : undefined;
+      const assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      const publisher = await pool.connect();
+      let publisherTransaction = false;
+      try {
+        await publisher.query('BEGIN');
+        publisherTransaction = true;
+        await publisher.query('SELECT id FROM consent_notice_versions WHERE id = $1::uuid FOR UPDATE', [oldNoticeId]);
+
+        const pendingWrite = executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId);
+        const outcome = pendingWrite.then(() => null, error => error as unknown);
+        await waitForBlockedQuery('consent_notice_versions');
+
+        const replacementId = await insertDraftNotice();
+        await publisher.query("UPDATE consent_notice_versions SET status = 'superseded' WHERE id = $1::uuid", [oldNoticeId]);
+        await publisher.query("UPDATE consent_notice_versions SET status = 'published' WHERE id = $1::uuid", [replacementId]);
+        await publisher.query('COMMIT');
+        publisherTransaction = false;
+        draftNoticeIds.delete(replacementId);
+
+        await expect(outcome).resolves.toMatchObject({ code: 'consent_required' });
+        const stored = await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId);
+        expect(stored?.status).toBe(operation === 'resume' ? 'paused' : 'in_progress');
+        expect(await db.select().from(assessmentResults).where(eq(assessmentResults.assessmentId, assessment.assessmentId))).toHaveLength(0);
+        expect(await db.select().from(assessmentAnswers).where(eq(assessmentAnswers.assessmentId, assessment.assessmentId))).toHaveLength(0);
+      } finally {
+        if (publisherTransaction) await publisher.query('ROLLBACK');
+        publisher.release();
+      }
+    },
+  );
+
+  it.each(['resume', 'complete', 'response'] as const)(
+    'commits %s before a concurrent notice replacement when its notice lock was acquired first',
+    async operation => {
+      const ownerId = await account();
+      const oldNoticeId = await grantConsent(ownerId);
+      const selected = operation === 'response' ? await instrument() : undefined;
+      const assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      const repository = new DrizzlePreliminaryAssessmentRepository(db);
+      if (operation === 'resume') {
+        const current = await repository.findByIdForOwner(assessment.assessmentId, ownerId);
+        if (!current) throw new Error('Synthetic assessment fixture missing');
+        const paused = pauseAssessment(current, new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)));
+        expect(await repository.saveForOwner(paused, ownerId, current.updatedAt)).toBe(true);
+      }
+
+      const assessmentBlocker = await pool.connect();
+      const publisher = await pool.connect();
+      let blockerActive = false;
+      let publisherActive = false;
+      let replacementId: string | undefined;
+      try {
+        await assessmentBlocker.query('BEGIN');
+        blockerActive = true;
+        await assessmentBlocker.query('SELECT assessment_id FROM preliminary_assessments WHERE assessment_id = $1::uuid FOR UPDATE', [assessment.assessmentId]);
+
+        const pendingWrite = executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId);
+        const outcome = pendingWrite.then(() => null, error => error as unknown);
+        await waitForBlockedQuery('preliminary_assessments');
+
+        await publisher.query('BEGIN');
+        publisherActive = true;
+        replacementId = await insertDraftNotice();
+        const publisherWrite = (async () => {
+          await publisher.query("UPDATE consent_notice_versions SET status = 'superseded' WHERE id = $1::uuid", [oldNoticeId]);
+          await publisher.query("UPDATE consent_notice_versions SET status = 'published' WHERE id = $1::uuid", [replacementId]);
+          await publisher.query('COMMIT');
+          publisherActive = false;
+          if (replacementId) draftNoticeIds.delete(replacementId);
+        })();
+        const publisherOutcome = publisherWrite.then(() => null, error => error as unknown);
+        await waitForBlockedQuery('consent_notice_versions');
+
+        await assessmentBlocker.query('COMMIT');
+        blockerActive = false;
+        await expect(outcome).resolves.toBeNull();
+        await expect(publisherOutcome).resolves.toBeNull();
+
+        const stored = await repository.findByIdForOwner(assessment.assessmentId, ownerId);
+        expect(stored?.status).toBe(operation === 'complete' ? 'completed' : 'in_progress');
+        expect(await db.select().from(assessmentResults).where(eq(assessmentResults.assessmentId, assessment.assessmentId)))
+          .toHaveLength(operation === 'complete' ? 1 : 0);
+        expect(await db.select().from(assessmentAnswers).where(eq(assessmentAnswers.assessmentId, assessment.assessmentId)))
+          .toHaveLength(operation === 'response' ? 1 : 0);
+      } finally {
+        if (blockerActive) await assessmentBlocker.query('ROLLBACK');
+        if (publisherActive) await publisher.query('ROLLBACK');
+        if (replacementId && publisherActive) draftNoticeIds.add(replacementId);
+        assessmentBlocker.release();
+        publisher.release();
+      }
+    },
+  );
 
   it('enforces unique answers/results, question-version integrity, and immutable approved instruments', async () => {
     const ownerId = await account();
