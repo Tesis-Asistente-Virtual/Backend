@@ -7,6 +7,7 @@
     "test": "vitest run --exclude tests/integration/**",
     "test:integration": "vitest run tests/integration",
     "db:migrate:test": "tsx scripts/migrate-test-db.ts",
+    "manual:test-signal-extraction": "tsx scripts/manual-test-signal-extraction.ts",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
@@ -28,12 +29,14 @@
     "jose": "^6.2.14",
     "openai": "^7.55.0",
     "pg": "^8.23.1",
+    "swagger-ui-express": "^5.0.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.19.2",
     "@types/pg": "^8.23.1",
+    "@types/swagger-ui-express": "^4.1.8",
     "drizzle-kit": "^0.31.11",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

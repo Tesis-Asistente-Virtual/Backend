@@ -8,6 +8,7 @@ import { AssistantGenerationUnavailable, ConversationArchived, InvalidConversati
 import { ConversationTurnInProgress } from '../../../modules/conversations/application/ports/conversation-turn-lock.js';
 import { ConsentNoticeUnavailable } from '../../../modules/consent/application/internal/command-services/record-my-consent-decision.js';
 import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/model/consent-errors.js';
+import { PreliminaryAssessmentError } from '../../../modules/preliminary-assessment/domain/model/assessment-errors.js';
 function hasUniqueViolationCode(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
@@ -50,6 +51,22 @@ export const errorHandler = (err, _req, res, _next) => {
     }
     if (err instanceof ConsentIdempotencyConflict) {
         res.status(409).json({ error: 'Consent decision conflicts with an earlier request' });
+        return;
+    }
+    if (err instanceof PreliminaryAssessmentError) {
+        if (err.code === 'assessment_not_found' || err.code === 'result_not_found') {
+            res.status(404).json({ error: err.code === 'assessment_not_found' ? 'Assessment not found' : 'Assessment result not found' });
+            return;
+        }
+        if (err.code === 'consent_required') {
+            res.status(403).json({ error: 'Current consent is required' });
+            return;
+        }
+        if (['invalid_transition', 'assessment_closed', 'instrument_unavailable', 'responses_incomplete', 'concurrent_modification', 'result_conflict'].includes(err.code)) {
+            res.status(409).json({ error: 'Assessment operation conflicts with its current state or availability' });
+            return;
+        }
+        res.status(400).json({ error: 'Invalid assessment request' });
         return;
     }
     if (err instanceof AssistantGenerationUnavailable) {
