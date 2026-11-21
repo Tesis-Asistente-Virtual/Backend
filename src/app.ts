@@ -8,6 +8,7 @@ import { conversationsRouter } from './modules/conversations/interfaces/rest/con
 import { openApiRouter } from './shared/infrastructure/http/openapi-routes.js';
 import { consentRouter } from './modules/consent/interfaces/rest/consent-routes.js';
 import { preliminaryAssessmentsRouter } from './modules/preliminary-assessment/interfaces/rest/preliminary-assessment-routes.js';
+import { monitoringRouter } from './modules/longitudinal-monitoring/interfaces/rest/monitoring-routes.js';
 export const app = express();
 app.use(express.json());
 app.use(openApiRouter);
@@ -19,4 +20,5 @@ app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/conversations', conversationsRouter);
 app.use('/api/v1/consents', consentRouter);
 app.use('/api/v1/preliminary-assessments', preliminaryAssessmentsRouter);
+app.use('/api/v1/monitoring', monitoringRouter);
 app.use(errorHandler);

@@ -21,6 +21,10 @@ import { ListConversationMessages } from '../../src/modules/conversations/applic
 import { JwtAccessTokenService } from '../../src/modules/authentication/infrastructure/security/jwt-access-token-service.js';
 import { authenticationMiddleware } from '../../src/shared/infrastructure/http/authentication-middleware.js';
 import { errorHandler } from '../../src/shared/infrastructure/http/error-handler.js';
+import { CheckConsentForPurpose } from '../../src/modules/consent/application/internal/query-services/check-consent-for-purpose.js';
+import { DrizzleConsentRepository } from '../../src/modules/consent/infrastructure/persistence/drizzle-consent-repository.js';
+import { ConsentConversationProcessingAuthorizer } from '../../src/modules/conversations/infrastructure/persistence/consent-conversation-processing-authorizer.js';
+import { grantTestConsent, withdrawTestConsent } from './consent-test-fixtures.js';
 
 const runId = randomUUID();
 let pool: Awaited<ReturnType<typeof connectTestDatabase>>['pool'];
@@ -29,15 +33,17 @@ let server: ReturnType<ReturnType<typeof express>['listen']> | undefined;
 const accountIds = new Set<string>();
 const emails = new Set<string>();
 let gateFirstStream = false;
+let providerCalls = 0;
 let firstDeltaReady = deferred();
 let releaseFirstDelta = deferred();
 
-async function createOwner(): Promise<{ id: string; conversationId: string }> {
+async function createOwner(withConsent = true): Promise<{ id: string; conversationId: string }> {
   const email = `conversation-stream-it-${runId}-${randomUUID()}@example.test`;
   emails.add(email);
   const [account] = await db.insert(authAccounts).values({ email, passwordHash: 'integration-test-hash' }).returning({ id: authAccounts.id });
   if (!account) throw new Error('Integration account insert returned no row');
   accountIds.add(account.id);
+  if (withConsent) await grantTestConsent(db, account.id, 'ai_conversation_processing');
   const conversation = await new DrizzleConversationRepository(db).create({ accountId: account.id });
   return { id: account.id, conversationId: conversation.id };
 }
@@ -53,17 +59,19 @@ beforeAll(async () => {
   const conversationsRepository = new DrizzleConversationRepository(db);
   const messagesRepository = new DrizzleConversationMessageRepository(db);
   const turnLock = new PostgresConversationTurnLock(pool);
+  const conversationConsent = new ConsentConversationProcessingAuthorizer(new CheckConsentForPurpose(new DrizzleConsentRepository(db)));
   const generator: AiTextGenerator = {
-    generateText: async () => ({ text: 'REST answer' }),
+    generateText: async () => { providerCalls += 1; return { text: 'REST answer' }; },
     async *streamText() {
+      providerCalls += 1;
       yield { type: 'delta', text: 'SSE ' };
       if (gateFirstStream) { firstDeltaReady.resolve(); await releaseFirstDelta.promise; }
       yield { type: 'delta', text: 'answer' };
       yield { type: 'completed', result: { text: 'SSE answer' } };
     },
   };
-  const streamService = new StreamConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200);
-  const restService = new SendConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200);
+  const streamService = new StreamConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200, conversationConsent);
+  const restService = new SendConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200, conversationConsent);
   const controller = new ConversationsController(
     new CreateConversation(conversationsRepository), new ListConversations(conversationsRepository),
     new GetConversation(conversationsRepository), new ListConversationMessages(conversationsRepository, messagesRepository),
@@ -72,6 +80,7 @@ beforeAll(async () => {
   const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
   const app = express();
   app.use(express.json());
+  app.post('/api/v1/conversations/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.sendConversationMessage(req, res).catch(next); });
   app.post('/api/v1/conversations/:id/messages/stream', authenticationMiddleware(jwt), (req, res, next) => { void controller.streamConversationMessage(req, res).catch(next); });
   app.use(errorHandler);
   server = app.listen(0, '127.0.0.1');
@@ -80,6 +89,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   gateFirstStream = false;
+  providerCalls = 0;
   releaseFirstDelta.resolve();
   if (!db) return;
   try {
@@ -148,8 +158,9 @@ describe('Conversation SSE PostgreSQL integration', () => {
       generateText: async () => ({ text: 'rest' }),
       async *streamText() { started.resolve(); await continueGeneration.promise; throw new Error('provider failed'); },
     };
-    const streaming = new StreamConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200);
-    const rest = new SendConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200);
+    const conversationConsent = new ConsentConversationProcessingAuthorizer(new CheckConsentForPurpose(new DrizzleConsentRepository(db)));
+    const streaming = new StreamConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200, conversationConsent);
+    const rest = new SendConversationMessage(conversationsRepository, messagesRepository, generator, turnLock, 10, 200, conversationConsent);
     const abort = new AbortController();
     const streamPromise = streaming.execute(owner.id, owner.conversationId, 'stream input', abort.signal, {
       onReady: async () => {}, emit: async event => { eventTypes.push(event.type); },
@@ -178,5 +189,35 @@ describe('Conversation SSE PostgreSQL integration', () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: 'Conversation not found' });
     expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, ownerA.conversationId))).toHaveLength(0);
+  });
+
+  it('denies REST before persisting or invoking the provider when consent is absent', async () => {
+    const owner = await createOwner(false);
+    const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
+    const token = await jwt.issue(owner.id);
+    const address = server?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'Current ai_conversation_processing consent is required' });
+    expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId))).toHaveLength(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  it('denies SSE before event-stream headers after consent withdrawal', async () => {
+    const owner = await createOwner();
+    await withdrawTestConsent(db, owner.id, 'ai_conversation_processing');
+    const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
+    const token = await jwt.issue(owner.id);
+    const address = server?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages/stream`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get('content-type')).not.toContain('text/event-stream');
+    expect(await response.json()).toEqual({ error: 'Current ai_conversation_processing consent is required' });
+    expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId))).toHaveLength(0);
+    expect(providerCalls).toBe(0);
   });
 });

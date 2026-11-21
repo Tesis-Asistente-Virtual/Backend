@@ -6,10 +6,13 @@ import { InvalidRefreshToken } from '../../../modules/authentication/application
 import { ProfileNotFound } from '../../../modules/users/application/internal/query-services/get-my-profile.js';
 import { ConversationNotFound } from '../../../modules/conversations/application/internal/query-services/get-conversation.js';
 import { AssistantGenerationUnavailable, ConversationArchived, InvalidConversationMessage } from '../../../modules/conversations/application/internal/command-services/send-conversation-message.js';
+import { ConversationProcessingConsentError } from '../../../modules/conversations/application/ports/conversation-processing-consent.js';
 import { ConversationTurnInProgress } from '../../../modules/conversations/application/ports/conversation-turn-lock.js';
 import { ConsentNoticeUnavailable } from '../../../modules/consent/application/internal/command-services/record-my-consent-decision.js';
 import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/model/consent-errors.js';
 import { PreliminaryAssessmentError } from '../../../modules/preliminary-assessment/domain/model/assessment-errors.js';
+import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-errors.js';
+import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
 
 function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -48,6 +51,11 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(400).json({ error: 'Invalid conversation message' });
     return;
   }
+  if (err instanceof ConversationProcessingConsentError) {
+    if (err.code === 'consent_required') { res.status(403).json({ error: 'Current ai_conversation_processing consent is required' }); return; }
+    res.status(503).json({ error: 'Consent status is temporarily unavailable' });
+    return;
+  }
   if (err instanceof ConsentNoticeUnavailable) { res.status(404).json({ error: 'Consent notice is unavailable' }); return; }
   if (err instanceof ConsentIdempotencyConflict) { res.status(409).json({ error: 'Consent decision conflicts with an earlier request' }); return; }
   if (err instanceof PreliminaryAssessmentError) {
@@ -57,6 +65,22 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
       res.status(409).json({ error: 'Assessment operation conflicts with its current state or availability' }); return;
     }
     res.status(400).json({ error: 'Invalid assessment request' }); return;
+  }
+  if (err instanceof MonitoringError) {
+    if (err.code === 'enrollment_not_found') { res.status(404).json({ error: 'Monitoring enrollment not found' }); return; }
+    if (err.code === 'consent_required') { res.status(403).json({ error: 'Current longitudinal monitoring consent is required' }); return; }
+    if (err.code === 'consent_unavailable') { res.status(503).json({ error: 'Consent status is temporarily unavailable' }); return; }
+    if (['invalid_transition', 'enrollment_inactive', 'enrollment_already_open', 'session_already_open', 'concurrent_modification'].includes(err.code)) {
+      res.status(409).json({ error: 'Monitoring operation conflicts with its current state' }); return;
+    }
+  }
+  if (err instanceof LongitudinalMonitoringDomainError) {
+    if (err.code === 'consent_required') { res.status(403).json({ error: 'Current longitudinal monitoring consent is required' }); return; }
+    if (err.code === 'enrollment_inactive' || err.code === 'invalid_transition') {
+      res.status(409).json({ error: 'Monitoring operation conflicts with its current state' }); return;
+    }
+    res.status(400).json({ error: 'Invalid monitoring request' });
+    return;
   }
   if (err instanceof AssistantGenerationUnavailable) {
     res.status(503).json({ error: 'Text generation is temporarily unavailable' });

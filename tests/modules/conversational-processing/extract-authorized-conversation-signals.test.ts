@@ -86,6 +86,7 @@ function harness(options: HarnessOptions = {}) {
   };
   const messageRepository: ConversationMessageRepository = {
     createForOwner: vi.fn(async () => null),
+    createForOwnerWithCurrentProcessingConsent: vi.fn(async () => null),
     findByIdsForOwner: vi.fn(async (_conversationId: string, _ownerId: string, requestedIds: readonly string[]) => {
       options.order?.push('messages');
       const returned = options.messages ?? defaultMessages;

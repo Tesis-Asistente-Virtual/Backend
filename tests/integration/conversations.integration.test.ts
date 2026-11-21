@@ -10,6 +10,10 @@ import { SendConversationMessage } from '../../src/modules/conversations/applica
 import { PostgresConversationTurnLock } from '../../src/modules/conversations/infrastructure/persistence/postgres-conversation-turn-lock.js';
 import type { AiTextGenerationRequest, AiTextGenerator } from '../../src/modules/conversations/application/ports/ai-text-generator.js';
 import { ConversationTurnInProgress } from '../../src/modules/conversations/application/ports/conversation-turn-lock.js';
+import { CheckConsentForPurpose } from '../../src/modules/consent/application/internal/query-services/check-consent-for-purpose.js';
+import { DrizzleConsentRepository } from '../../src/modules/consent/infrastructure/persistence/drizzle-consent-repository.js';
+import { ConsentConversationProcessingAuthorizer } from '../../src/modules/conversations/infrastructure/persistence/consent-conversation-processing-authorizer.js';
+import { ensureTestPublishedNotice, grantTestConsent, withdrawTestConsent } from './consent-test-fixtures.js';
 
 const runId = randomUUID();
 let pool: Awaited<ReturnType<typeof connectTestDatabase>>['pool'];
@@ -173,6 +177,7 @@ describe('Conversations PostgreSQL integration', () => {
 
   it('persists a complete message turn and builds provider context from only this owner’s completed messages', async () => {
     const owner = await createAccount();
+    await grantTestConsent(db, owner.id, 'ai_conversation_processing');
     const other = await createAccount();
     const conversationRepository = new DrizzleConversationRepository(db);
     const messageRepository = new DrizzleConversationMessageRepository(db);
@@ -187,7 +192,8 @@ describe('Conversations PostgreSQL integration', () => {
       generateText: async request => { context = request; return { text: 'Generated test answer' }; },
       async *streamText() {},
     };
-    const service = new SendConversationMessage(conversationRepository, messageRepository, generator, new PostgresConversationTurnLock(pool), 10, 200);
+    const service = new SendConversationMessage(conversationRepository, messageRepository, generator, new PostgresConversationTurnLock(pool), 10, 200,
+      new ConsentConversationProcessingAuthorizer(new CheckConsentForPurpose(new DrizzleConsentRepository(db))));
 
     const result = await service.execute(owner.id, conversation.id, 'Current student question');
     expect(result.userMessage).toMatchObject({ role: 'user', content: 'Current student question', status: 'completed' });
@@ -203,6 +209,7 @@ describe('Conversations PostgreSQL integration', () => {
 
   it('serializes concurrent turns with PostgreSQL advisory locks and rejects a competing request', async () => {
     const owner = await createAccount();
+    await grantTestConsent(db, owner.id, 'ai_conversation_processing');
     const conversation = await new DrizzleConversationRepository(db).create({ accountId: owner.id });
     const messageRepository = new DrizzleConversationMessageRepository(db);
     let announceProviderStarted: () => void = () => {};
@@ -217,6 +224,7 @@ describe('Conversations PostgreSQL integration', () => {
     const service = new SendConversationMessage(
       new DrizzleConversationRepository(db), messageRepository, generator,
       new PostgresConversationTurnLock(pool), 10, 200,
+      new ConsentConversationProcessingAuthorizer(new CheckConsentForPurpose(new DrizzleConsentRepository(db))),
     );
 
     const firstTurn = service.execute(owner.id, conversation.id, 'First concurrent message');
@@ -228,6 +236,36 @@ describe('Conversations PostgreSQL integration', () => {
     const rows = await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, conversation.id));
     expect(rows.filter(row => row.role === 'user')).toHaveLength(1);
     expect(rows.filter(row => row.role === 'assistant' && row.status === 'completed')).toHaveLength(1);
+  });
+
+  it('serializes message insertion against a concurrent consent withdrawal', async () => {
+    const owner = await createAccount();
+    await grantTestConsent(db, owner.id, 'ai_conversation_processing');
+    const conversation = await new DrizzleConversationRepository(db).create({ accountId: owner.id });
+    const messages = new DrizzleConversationMessageRepository(db);
+    const notice = await ensureTestPublishedNotice(db, 'ai_conversation_processing');
+    const at = new Date();
+    const consentRepository = new DrizzleConsentRepository(db);
+
+    const [writeOutcome] = await Promise.allSettled([
+      messages.createForOwnerWithCurrentProcessingConsent(owner.id, {
+        conversationId: conversation.id, role: 'user', content: 'Concurrent synthetic request', status: 'completed',
+      }),
+      consentRepository.recordDecision(owner.id, 'ai_conversation_processing', notice.id, 'withdrawn', randomUUID(), at),
+    ]);
+
+    const finalConsent = (await consentRepository.getStatus(owner.id, new Date()))
+      .find(status => status.purpose === 'ai_conversation_processing');
+    const stored = await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, conversation.id));
+    expect(finalConsent?.state).toBe('withdrawn');
+    if (writeOutcome.status === 'rejected') {
+      expect(writeOutcome.reason).toMatchObject({ code: 'consent_required' });
+      expect(stored).toHaveLength(0);
+    } else {
+      // If the write wins the account-row lock, it linearizes before the withdrawal.
+      expect(writeOutcome.value?.content).toBe('Concurrent synthetic request');
+      expect(stored).toHaveLength(1);
+    }
   });
 
   it('enforces PostgreSQL foreign keys and status/role checks', async () => {

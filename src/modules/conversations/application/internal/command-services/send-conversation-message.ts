@@ -6,6 +6,7 @@ import type { ConversationMessageRepository } from '../../../domain/repositories
 import { ConversationNotFound } from '../query-services/get-conversation.js';
 import { assistantInstructions } from '../../assistant-instructions.js';
 import { buildConversationContext } from './build-conversation-context.js';
+import { requireConversationProcessingConsent, type ConversationProcessingConsentAuthorizer } from '../../ports/conversation-processing-consent.js';
 
 export const MAX_USER_MESSAGE_CHARACTERS = 5_000;
 
@@ -34,6 +35,7 @@ export class SendConversationMessage {
     private readonly turnLock: ConversationTurnLock,
     private readonly maxContextMessages: number,
     private readonly maxOutputTokens: number,
+    private readonly consent: ConversationProcessingConsentAuthorizer,
   ) {}
 
   async execute(accountId: string, conversationId: string, rawContent: string): Promise<SentConversationTurn> {
@@ -44,7 +46,8 @@ export class SendConversationMessage {
       if (!conversation) throw new ConversationNotFound();
       if (conversation.status !== 'active') throw new ConversationArchived();
 
-      const userMessage = await this.messages.createForOwner(accountId, {
+      await requireConversationProcessingConsent(this.consent, accountId);
+      const userMessage = await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, {
         conversationId,
         role: 'user',
         content,
@@ -54,6 +57,8 @@ export class SendConversationMessage {
 
       const context = await buildConversationContext(this.messages, conversationId, accountId, userMessage, this.maxContextMessages);
 
+      // Revalidate immediately before disclosing the context to the provider.
+      await requireConversationProcessingConsent(this.consent, accountId);
       let generatedText: string;
       try {
         const result = await this.generator.generateText({
@@ -64,17 +69,17 @@ export class SendConversationMessage {
         generatedText = result.text.trim();
         if (!generatedText) throw new Error('Provider returned empty text');
       } catch {
-        const failedMessage = await this.messages.createForOwner(accountId, {
-          conversationId,
-          role: 'assistant',
-          content: '',
-          status: 'failed',
-        });
-        if (!failedMessage) throw new ConversationNotFound();
+        try {
+          await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, {
+            conversationId, role: 'assistant', content: '', status: 'failed',
+          });
+        } catch {
+          // A revocation or persistence failure must not be replaced by a secondary failure write.
+        }
         throw new AssistantGenerationUnavailable();
       }
 
-      const assistantMessage = await this.messages.createForOwner(accountId, {
+      const assistantMessage = await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, {
         conversationId,
         role: 'assistant',
         content: generatedText,

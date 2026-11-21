@@ -9,6 +9,7 @@ import type { Page, Pagination } from '../../../src/modules/conversations/domain
 import type { ConversationRepository } from '../../../src/modules/conversations/domain/repositories/conversation-repository.js';
 import type { ConversationMessageRepository } from '../../../src/modules/conversations/domain/repositories/conversation-message-repository.js';
 import { assistantInstructions } from '../../../src/modules/conversations/application/assistant-instructions.js';
+import { ConversationProcessingConsentError, type ConversationProcessingConsentAuthorizer } from '../../../src/modules/conversations/application/ports/conversation-processing-consent.js';
 
 const accountId = '550e8400-e29b-41d4-a716-446655440000';
 const conversationId = '550e8400-e29b-41d4-a716-446655440001';
@@ -18,7 +19,7 @@ function message(id: string, role: 'user' | 'assistant', content: string, status
   return { id, conversationId, role, content, status, createdAt: new Date(now.getTime() + offset) };
 }
 
-function harness(options: { status?: 'active' | 'archived' | null; providerError?: Error; providerText?: string; recent?: ConversationMessage[]; lockError?: Error } = {}) {
+function harness(options: { status?: 'active' | 'archived' | null; providerError?: Error; providerText?: string; recent?: ConversationMessage[]; lockError?: Error; consentResults?: boolean[]; consentError?: Error; atomicConsentError?: Error } = {}) {
   const conversation: Conversation = { id: conversationId, accountId, title: null, status: options.status ?? 'active', createdAt: now, updatedAt: now };
   const created: ConversationMessage[] = [];
   const conversations: ConversationRepository = {
@@ -26,12 +27,17 @@ function harness(options: { status?: 'active' | 'archived' | null; providerError
     findByIdForOwner: vi.fn(async (id: string, ownerId: string) => id === conversationId && ownerId === accountId && options.status !== null ? conversation : null),
     listByOwner: vi.fn(async (_ownerId: string, pagination: Pagination): Promise<Page<Conversation>> => ({ items: [], ...pagination, hasMore: false })),
   };
-  const messages: ConversationMessageRepository = {
-    createForOwner: vi.fn(async (ownerId: string, input: NewConversationMessage) => {
+  const createMessage = vi.fn(async (ownerId: string, input: NewConversationMessage) => {
       if (ownerId !== accountId) return null;
       const row = message(`message-${created.length + 1}`, input.role, input.content, input.status === 'failed' ? 'failed' : 'completed', created.length);
       created.push(row);
       return row;
+    });
+  const messages: ConversationMessageRepository = {
+    createForOwner: createMessage,
+    createForOwnerWithCurrentProcessingConsent: vi.fn(async (...args) => {
+      if (options.atomicConsentError) throw options.atomicConsentError;
+      return createMessage(...args);
     }),
     findByIdsForOwner: vi.fn(async () => []),
     listByConversationForOwner: vi.fn(async (_id: string, _ownerId: string, pagination: Pagination): Promise<Page<ConversationMessage>> => ({ items: [], ...pagination, hasMore: false })),
@@ -54,9 +60,16 @@ function harness(options: { status?: 'active' | 'archived' | null; providerError
       return operation();
     },
   };
+  let consentIndex = 0;
+  const consent: ConversationProcessingConsentAuthorizer = {
+    isAuthorized: vi.fn(async () => {
+      if (options.consentError) throw options.consentError;
+      return options.consentResults?.[consentIndex++] ?? true;
+    }),
+  };
   return {
-    service: new SendConversationMessage(conversations, messages, generator, lock, 4, 250),
-    conversations, messages, generator, lock, lockCalls, created, getCapturedRequest: () => capturedRequest,
+    service: new SendConversationMessage(conversations, messages, generator, lock, 4, 250, consent),
+    conversations, messages, generator, lock, consent, lockCalls, created, getCapturedRequest: () => capturedRequest,
   };
 }
 
@@ -119,5 +132,35 @@ describe('SendConversationMessage', () => {
     await expect(h.service.execute(accountId, conversationId, 'Retry')).rejects.toBeInstanceOf(ConversationTurnInProgress);
     expect(h.messages.createForOwner).not.toHaveBeenCalled();
     expect(h.generator.generateText).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before persistence and provider disclosure when current consent is absent', async () => {
+    const h = harness({ consentResults: [false] });
+    await expect(h.service.execute(accountId, conversationId, 'Sensitive text')).rejects
+      .toMatchObject({ name: 'ConversationProcessingConsentError', code: 'consent_required' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).not.toHaveBeenCalled();
+    expect(h.generator.generateText).not.toHaveBeenCalled();
+  });
+
+  it('revalidates consent immediately before provider disclosure', async () => {
+    const h = harness({ consentResults: [true, false] });
+    await expect(h.service.execute(accountId, conversationId, 'Sensitive text')).rejects
+      .toMatchObject({ code: 'consent_required' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenCalledTimes(1);
+    expect(h.generator.generateText).not.toHaveBeenCalled();
+  });
+
+  it('maps checker failures to unavailable and catches a consent withdrawal at the atomic insert boundary', async () => {
+    const unavailable = harness({ consentError: new Error('private consent database detail') });
+    await expect(unavailable.service.execute(accountId, conversationId, 'Sensitive text')).rejects
+      .toMatchObject({ code: 'consent_unavailable' });
+    expect(unavailable.generator.generateText).not.toHaveBeenCalled();
+    expect(unavailable.messages.createForOwnerWithCurrentProcessingConsent).not.toHaveBeenCalled();
+
+    const raced = harness({ atomicConsentError: new ConversationProcessingConsentError('consent_required') });
+    await expect(raced.service.execute(accountId, conversationId, 'Sensitive text')).rejects
+      .toMatchObject({ code: 'consent_required' });
+    expect(raced.generator.generateText).not.toHaveBeenCalled();
+    expect(raced.messages.createForOwner).not.toHaveBeenCalled();
   });
 });

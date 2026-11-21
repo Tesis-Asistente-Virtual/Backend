@@ -7,10 +7,10 @@ import swaggerUi from 'swagger-ui-express';
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all twenty-six operations', () => {
+  it('generates OpenAPI 3.0 documentation for all thirty-six operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(26);
+    expect(operations).toHaveLength(36);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -32,6 +32,9 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/preliminary-assessments/{id}/withdraw');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/preliminary-assessments/{id}/complete');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/preliminary-assessments/{id}/result');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/info');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions');
     expect(openApiDocument.paths).toHaveProperty('/health');
     expect(openApiDocument.components.schemas).toHaveProperty('SignUpRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('UpdateMyProfileRequest');
@@ -41,6 +44,9 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.components.schemas).toHaveProperty('SentConversationTurnResponse');
     expect(openApiDocument.components.schemas).toHaveProperty('StartAssessmentRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('AssessmentResult');
+    expect(openApiDocument.components.schemas).toHaveProperty('MonitoringInfo');
+    expect(openApiDocument.components.schemas).toHaveProperty('MonitoringEnrollment');
+    expect(openApiDocument.components.schemas).toHaveProperty('MonitoringSession');
   });
   it('marks both private profile operations as Bearer protected', () => {
     const mePath = openApiDocument.paths['/api/v1/users/me'];

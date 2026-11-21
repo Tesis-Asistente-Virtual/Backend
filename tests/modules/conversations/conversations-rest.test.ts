@@ -16,6 +16,7 @@ import type { ConversationTurnLock } from '../../../src/modules/conversations/ap
 import { SendConversationMessage } from '../../../src/modules/conversations/application/internal/command-services/send-conversation-message.js';
 import { errorHandler } from '../../../src/shared/infrastructure/http/error-handler.js';
 import { paginationQuerySchema } from '../../../src/modules/conversations/interfaces/rest/validation/conversation-request-schemas.js';
+import type { ConversationProcessingConsentAuthorizer } from '../../../src/modules/conversations/application/ports/conversation-processing-consent.js';
 
 const accountId = '550e8400-e29b-41d4-a716-446655440000';
 const conversationId = '550e8400-e29b-41d4-a716-446655440001';
@@ -23,14 +24,16 @@ const createdAt = new Date('2026-01-01T00:00:00.000Z');
 const conversation: Conversation = { id: conversationId, accountId, title: null, status: 'active', createdAt, updatedAt: createdAt };
 const message: ConversationMessage = { id: '550e8400-e29b-41d4-a716-446655440002', conversationId, role: 'assistant', content: 'Hello', status: 'completed', createdAt };
 
-function harness(foundConversation: Conversation | null = conversation, generationConfigured = true) {
+function harness(foundConversation: Conversation | null = conversation, generationConfigured = true, consentGranted = true) {
   const conversations: ConversationRepository = {
     create: vi.fn(async (input: NewConversation) => ({ ...conversation, accountId: input.accountId, title: input.title ?? null })),
     findByIdForOwner: vi.fn(async (id: string, ownerId: string) => id === conversationId && ownerId === accountId ? foundConversation : null),
     listByOwner: vi.fn(async (_ownerId: string, pagination: Pagination): Promise<Page<Conversation>> => ({ items: [conversation], ...pagination, hasMore: false })),
   };
+  const createMessage = vi.fn(async (_ownerId: string, input: Parameters<ConversationMessageRepository['createForOwner']>[1]) => ({ ...message, role: input.role, content: input.content, status: input.status ?? 'completed' }));
   const messages: ConversationMessageRepository = {
-    createForOwner: vi.fn(async (_ownerId, input) => ({ ...message, role: input.role, content: input.content, status: input.status ?? 'completed' })),
+    createForOwner: createMessage,
+    createForOwnerWithCurrentProcessingConsent: createMessage,
     listByConversationForOwner: vi.fn(async (_id: string, _ownerId: string, pagination: Pagination): Promise<Page<ConversationMessage>> => ({ items: [message], ...pagination, hasMore: false })),
     listRecentCompletedForOwner: vi.fn(async () => []),
   };
@@ -39,13 +42,14 @@ function harness(foundConversation: Conversation | null = conversation, generati
     async *streamText() {},
   };
   const lock: ConversationTurnLock = { runExclusive: vi.fn(async (_id, operation) => operation()) };
+  const consent: ConversationProcessingConsentAuthorizer = { isAuthorized: vi.fn(async () => consentGranted) };
   return {
     controller: new ConversationsController(
       new CreateConversation(conversations),
       new ListConversations(conversations),
       new GetConversation(conversations),
       new ListConversationMessages(conversations, messages),
-      generationConfigured ? new SendConversationMessage(conversations, messages, generator, lock, 4, 250) : undefined,
+      generationConfigured ? new SendConversationMessage(conversations, messages, generator, lock, 4, 250, consent) : undefined,
     ), conversations, messages,
   };
 }
@@ -122,6 +126,16 @@ describe('Conversations REST controllers', () => {
     errorHandler(failure, {} as Request, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(503);
     expect(res.json).toHaveBeenCalledWith({ error: 'Text generation is temporarily unavailable' });
+  });
+
+  it('returns 403 and performs no message write or generation without current purpose consent', async () => {
+    const h = harness(conversation, true, false); const res = response();
+    let failure: unknown;
+    try { await h.controller.sendConversationMessage(request(true, { content: 'Sensitive text' }, { id: conversationId }), res); } catch (error) { failure = error; }
+    errorHandler(failure, {} as Request, res, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Current ai_conversation_processing consent is required' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).not.toHaveBeenCalled();
   });
 
   it('maps an absent or foreign conversation to a generic 404', async () => {

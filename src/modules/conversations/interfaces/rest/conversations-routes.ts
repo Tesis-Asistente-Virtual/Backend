@@ -16,6 +16,9 @@ import { SendConversationMessage } from '../../application/internal/command-serv
 import { StreamConversationMessage } from '../../application/internal/command-services/stream-conversation-message.js';
 import { env } from '../../../../config/env.js';
 import { ConsoleConversationStreamObserver } from '../../infrastructure/observability/console-conversation-stream-observer.js';
+import { DrizzleConsentRepository } from '../../../consent/infrastructure/persistence/drizzle-consent-repository.js';
+import { CheckConsentForPurpose } from '../../../consent/application/internal/query-services/check-consent-for-purpose.js';
+import { ConsentConversationProcessingAuthorizer } from '../../infrastructure/persistence/consent-conversation-processing-authorizer.js';
 
 const router = Router();
 const jwt = JwtAccessTokenService.fromEnvironment();
@@ -23,6 +26,7 @@ if (db && pool && jwt) {
   const conversations = new DrizzleConversationRepository(db);
   const messages = new DrizzleConversationMessageRepository(db);
   const turnLock = new PostgresConversationTurnLock(pool);
+  const conversationConsent = new ConsentConversationProcessingAuthorizer(new CheckConsentForPurpose(new DrizzleConsentRepository(db)));
   let sendMessage: SendConversationMessage | undefined;
   let streamMessage: StreamConversationMessage | undefined;
   try {
@@ -34,6 +38,7 @@ if (db && pool && jwt) {
       turnLock,
       env.openAiMaxContextMessages,
       env.openAiMaxOutputTokens,
+      conversationConsent,
     );
     streamMessage = new StreamConversationMessage(
       conversations,
@@ -42,6 +47,7 @@ if (db && pool && jwt) {
       turnLock,
       env.openAiMaxContextMessages,
       env.openAiMaxOutputTokens,
+      conversationConsent,
       new ConsoleConversationStreamObserver(),
     );
   } catch (error) {

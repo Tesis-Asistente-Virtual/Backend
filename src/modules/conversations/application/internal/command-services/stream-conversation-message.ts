@@ -9,13 +9,14 @@ import { assistantInstructions } from '../../assistant-instructions.js';
 import { MAX_USER_MESSAGE_CHARACTERS, ConversationArchived, InvalidConversationMessage } from './send-conversation-message.js';
 import { ConversationNotFound } from '../query-services/get-conversation.js';
 import { buildConversationContext } from './build-conversation-context.js';
+import { ConversationProcessingConsentError, requireConversationProcessingConsent, type ConversationProcessingConsentAuthorizer } from '../../ports/conversation-processing-consent.js';
 
 export type ConversationMessageStreamEvent =
   | { readonly type: 'message.started'; readonly messageId: string }
   | { readonly type: 'message.delta'; readonly text: string }
   | { readonly type: 'message.completed'; readonly messageId: string; readonly status: 'completed' }
   | { readonly type: 'stream.completed' }
-  | { readonly type: 'stream.error'; readonly code: 'generation_failed' | 'persistence_failed' };
+  | { readonly type: 'stream.error'; readonly code: 'generation_failed' | 'persistence_failed' | 'consent_required' | 'consent_unavailable' };
 
 export interface ConversationMessageStreamCallbacks {
   /** Called only after owner/status checks and the shared PostgreSQL lock succeed. */
@@ -52,6 +53,7 @@ export class StreamConversationMessage {
     private readonly turnLock: ConversationTurnLock,
     private readonly maxContextMessages: number,
     private readonly maxOutputTokens: number,
+    private readonly consent: ConversationProcessingConsentAuthorizer,
     private readonly observer: ConversationStreamObserver = noOpConversationStreamObserver,
   ) {}
 
@@ -65,10 +67,23 @@ export class StreamConversationMessage {
       if (conversation.status !== 'active') throw new ConversationArchived();
       if (signal.aborted) return;
 
+      // Denials here remain ordinary HTTP responses because SSE headers are not sent yet.
+      await requireConversationProcessingConsent(this.consent, accountId);
       await callbacks.onReady();
       if (signal.aborted) return;
 
-      const userMessage = await this.messages.createForOwner(accountId, { conversationId, role: 'user', content, status: 'completed' });
+      let userMessage: ConversationMessage | null;
+      try {
+        // The repository rechecks the exact current published notice and latest decision
+        // in a short transaction serialized with consent decisions.
+        userMessage = await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, { conversationId, role: 'user', content, status: 'completed' });
+      } catch (error) {
+        if (error instanceof ConversationProcessingConsentError) {
+          await this.emitError(callbacks, signal, error.code);
+          return;
+        }
+        throw error;
+      }
       if (!userMessage) throw new ConversationNotFound();
       try {
         await callbacks.emit({ type: 'message.started', messageId: userMessage.id });
@@ -85,6 +100,15 @@ export class StreamConversationMessage {
         this.report({ operation: 'conversation_stream', stage: 'context_read', errorKind: 'database' });
         await this.persistFailedMessage(accountId, conversationId);
         await this.emitError(callbacks, signal, 'persistence_failed');
+        return;
+      }
+
+      // Do not disclose context if consent was withdrawn while the context was loaded.
+      try {
+        await requireConversationProcessingConsent(this.consent, accountId);
+      } catch (error) {
+        const code = error instanceof ConversationProcessingConsentError ? error.code : 'consent_unavailable';
+        await this.emitError(callbacks, signal, code);
         return;
       }
 
@@ -185,8 +209,12 @@ export class StreamConversationMessage {
 
       let assistantMessage: ConversationMessage | null;
       try {
-        assistantMessage = await this.messages.createForOwner(accountId, { conversationId, role: 'assistant', content: completedText, status: 'completed' });
-      } catch {
+        assistantMessage = await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, { conversationId, role: 'assistant', content: completedText, status: 'completed' });
+      } catch (error) {
+        if (error instanceof ConversationProcessingConsentError) {
+          await this.emitError(callbacks, signal, error.code);
+          return;
+        }
         this.report({ operation: 'conversation_stream', stage: 'assistant_persistence', errorKind: 'database' });
         await this.emitError(callbacks, signal, 'persistence_failed');
         return;
@@ -212,14 +240,14 @@ export class StreamConversationMessage {
 
   private async persistFailedMessage(accountId: string, conversationId: string): Promise<void> {
     try {
-      const failedMessage = await this.messages.createForOwner(accountId, { conversationId, role: 'assistant', content: '', status: 'failed' });
+      const failedMessage = await this.messages.createForOwnerWithCurrentProcessingConsent(accountId, { conversationId, role: 'assistant', content: '', status: 'failed' });
       if (!failedMessage) this.report({ operation: 'conversation_stream', stage: 'failure_persistence', errorKind: 'database' });
     } catch {
       this.report({ operation: 'conversation_stream', stage: 'failure_persistence', errorKind: 'database' });
     }
   }
 
-  private async emitError(callbacks: ConversationMessageStreamCallbacks, signal: AbortSignal, code: 'generation_failed' | 'persistence_failed'): Promise<void> {
+  private async emitError(callbacks: ConversationMessageStreamCallbacks, signal: AbortSignal, code: 'generation_failed' | 'persistence_failed' | 'consent_required' | 'consent_unavailable'): Promise<void> {
     if (signal.aborted) return;
     try { await callbacks.emit({ type: 'stream.error', code }); }
     catch { this.report({ operation: 'conversation_stream', stage: 'completion_write', errorKind: 'transport' }); }

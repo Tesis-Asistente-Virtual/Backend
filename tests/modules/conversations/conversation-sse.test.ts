@@ -16,12 +16,13 @@ import type { Conversation } from '../../../src/modules/conversations/domain/mod
 import type { ConversationMessage } from '../../../src/modules/conversations/domain/model/conversation-message.js';
 import type { ConversationRepository } from '../../../src/modules/conversations/domain/repositories/conversation-repository.js';
 import type { ConversationMessageRepository } from '../../../src/modules/conversations/domain/repositories/conversation-message-repository.js';
+import { ConversationProcessingConsentError, type ConversationProcessingConsentAuthorizer } from '../../../src/modules/conversations/application/ports/conversation-processing-consent.js';
 
 const ownerId = '550e8400-e29b-41d4-a716-446655440000';
 const conversationId = '550e8400-e29b-41d4-a716-446655440001';
 const stamp = new Date('2026-01-01T00:00:00Z');
 
-function harness(options: { archived?: boolean; exists?: boolean; lockBusy?: boolean; providerFails?: boolean; providerFailure?: AiTextGenerationError; persistAssistantFails?: boolean } = {}) {
+function harness(options: { archived?: boolean; exists?: boolean; lockBusy?: boolean; providerFails?: boolean; providerFailure?: AiTextGenerationError; persistAssistantFails?: boolean; consentResults?: boolean[]; atomicConsentError?: Error; consentError?: Error } = {}) {
   const conversation: Conversation = { id: conversationId, accountId: ownerId, title: null, status: options.archived ? 'archived' : 'active', createdAt: stamp, updatedAt: stamp };
   let id = 1;
   const messagesCreated: ConversationMessage[] = [
@@ -34,12 +35,17 @@ function harness(options: { archived?: boolean; exists?: boolean; lockBusy?: boo
     findByIdForOwner: vi.fn(async () => options.exists === false ? null : conversation),
     listByOwner: vi.fn(),
   } as unknown as ConversationRepository;
-  const messages = {
-    createForOwner: vi.fn(async (_account: string, input: { conversationId: string; role: 'user' | 'assistant'; content: string; status?: 'generating' | 'completed' | 'failed' }) => {
+  const createMessage = vi.fn(async (_account: string, input: { conversationId: string; role: 'user' | 'assistant'; content: string; status?: 'generating' | 'completed' | 'failed' }) => {
       if (options.persistAssistantFails && input.role === 'assistant' && input.status === 'completed') throw new Error('private database detail');
       const created: ConversationMessage = { id: `550e8400-e29b-41d4-a716-44665544000${id++}`, conversationId: input.conversationId, role: input.role, content: input.content, status: input.status ?? 'completed', createdAt: new Date(stamp.getTime() + id) };
       messagesCreated.push(created);
       return created;
+    });
+  const messages = {
+    createForOwner: createMessage,
+    createForOwnerWithCurrentProcessingConsent: vi.fn(async (...args: Parameters<typeof createMessage>) => {
+      if (options.atomicConsentError) throw options.atomicConsentError;
+      return createMessage(...args);
     }),
     listByConversationForOwner: vi.fn(),
     listRecentCompletedForOwner: vi.fn(async () => messagesCreated.filter(message => message.status === 'completed')),
@@ -66,13 +72,18 @@ function harness(options: { archived?: boolean; exists?: boolean; lockBusy?: boo
   };
   const recordFailure = vi.fn((_observation: ConversationStreamFailureObservation) => {});
   const observer: ConversationStreamObserver & { recordFailure: typeof recordFailure } = { recordFailure };
-  const stream = new StreamConversationMessage(conversations, messages, generator, lock, 10, 200, observer);
+  let consentIndex = 0;
+  const consent: ConversationProcessingConsentAuthorizer = { isAuthorized: vi.fn(async () => {
+    if (options.consentError) throw options.consentError;
+    return options.consentResults?.[consentIndex++] ?? true;
+  }) };
+  const stream = new StreamConversationMessage(conversations, messages, generator, lock, 10, 200, consent, observer);
   const controller = new ConversationsController(
     new CreateConversation(conversations), new ListConversations(conversations), new GetConversation(conversations),
     new ListConversationMessages(conversations, messages),
-    new SendConversationMessage(conversations, messages, generator, lock, 10, 200), stream,
+    new SendConversationMessage(conversations, messages, generator, lock, 10, 200, consent), stream,
   );
-  return { controller, conversations, messages, generator, lock, messagesCreated, generationRequests, observer };
+  return { controller, conversations, messages, generator, lock, consent, messagesCreated, generationRequests, observer };
 }
 
 function makeRequest(body: unknown = { content: '  Student text  ' }, authenticated = true): Request {
@@ -110,9 +121,9 @@ describe('Conversation SSE endpoint', () => {
       'event: message.started', 'event: message.delta', 'event: message.delta', 'event: message.completed', 'event: stream.completed',
     ]);
     expect(res.chunks.every(chunk => chunk.endsWith('\n\n'))).toBe(true);
-    expect(h.messages.createForOwner).toHaveBeenCalledTimes(2);
-    expect(h.messages.createForOwner).toHaveBeenNthCalledWith(1, ownerId, { conversationId, role: 'user', content: 'Student text', status: 'completed' });
-    expect(h.messages.createForOwner).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: 'Hola, ¿cómo estás?', status: 'completed' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenCalledTimes(2);
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenNthCalledWith(1, ownerId, { conversationId, role: 'user', content: 'Student text', status: 'completed' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: 'Hola, ¿cómo estás?', status: 'completed' });
     expect(h.generationRequests[0]?.messages.map(message => message.content)).toEqual(['Earlier student message', 'Earlier assistant reply', 'Student text']);
     expect(h.generationRequests[0]?.messages.filter(message => message.content === 'Student text')).toHaveLength(1);
     expect(res.writableEnded).toBe(true);
@@ -135,13 +146,44 @@ describe('Conversation SSE endpoint', () => {
     expect(busyResponse.headersSent).toBe(false);
   });
 
+  it('rejects an unauthorised SSE request before headers, persistence, or provider execution', async () => {
+    const h = harness({ consentResults: [false] }); const res = makeResponse();
+    await expect(h.controller.streamConversationMessage(makeRequest(), res)).rejects
+      .toMatchObject({ name: 'ConversationProcessingConsentError', code: 'consent_required' });
+    expect(res.headersSent).toBe(false);
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).not.toHaveBeenCalled();
+    expect(h.generationRequests).toHaveLength(0);
+  });
+
+  it('emits a safe consent error if authorization is lost after the user message is persisted but before provider disclosure', async () => {
+    const h = harness({ consentResults: [true, false] }); const res = makeResponse();
+    await h.controller.streamConversationMessage(makeRequest(), res);
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.chunks.map(chunk => chunk.slice(0, chunk.indexOf('\n')))).toEqual(['event: message.started', 'event: stream.error']);
+    expect(res.chunks.at(-1)).toContain('"code":"consent_required"');
+    expect(h.generationRequests).toHaveLength(0);
+    expect(h.messagesCreated.slice(2)).toHaveLength(1);
+    expect(h.messagesCreated[2]).toMatchObject({ role: 'user', status: 'completed' });
+    expect(res.chunks.join('')).not.toContain('message.delta');
+  });
+
+  it('emits a safe SSE consent error when the atomic persistence boundary detects a concurrent withdrawal', async () => {
+    const h = harness({ atomicConsentError: new ConversationProcessingConsentError('consent_required') }); const res = makeResponse();
+    await h.controller.streamConversationMessage(makeRequest(), res);
+    expect(res.headersSent).toBe(true);
+    expect(res.chunks.map(chunk => chunk.slice(0, chunk.indexOf('\n')))).toEqual(['event: stream.error']);
+    expect(res.chunks[0]).toContain('"code":"consent_required"');
+    expect(h.messagesCreated).toHaveLength(2);
+    expect(h.generationRequests).toHaveLength(0);
+  });
+
   it('emits a safe stream.error after provider deltas and never emits completion', async () => {
     const h = harness({ providerFails: true }); const res = makeResponse();
     await h.controller.streamConversationMessage(makeRequest(), res);
     expect(res.chunks.map(chunk => chunk.slice(0, chunk.indexOf('\n')))).toEqual(['event: message.started', 'event: message.delta', 'event: stream.error']);
     expect(res.chunks.join('')).not.toContain('private provider detail');
     expect(res.chunks.join('')).not.toContain('stream.completed');
-    expect(h.messages.createForOwner).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: '', status: 'failed' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: '', status: 'failed' });
     expect(h.observer.recordFailure).toHaveBeenCalledWith({ operation: 'conversation_stream', stage: 'provider_stream', errorKind: 'unknown' });
     expect(JSON.stringify(h.observer.recordFailure.mock.calls)).not.toContain('private provider detail');
   });
@@ -162,7 +204,7 @@ describe('Conversation SSE endpoint', () => {
     await h.controller.streamConversationMessage(makeRequest(), res);
     expect(res.chunks.join('')).not.toContain('message.completed');
     expect(res.chunks.join('')).not.toContain('stream.completed');
-    expect(h.messages.createForOwner).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: '', status: 'failed' });
+    expect(h.messages.createForOwnerWithCurrentProcessingConsent).toHaveBeenNthCalledWith(2, ownerId, { conversationId, role: 'assistant', content: '', status: 'failed' });
     expect(h.observer.recordFailure).toHaveBeenCalledWith({ operation: 'conversation_stream', stage: 'cancelled', errorKind: 'cancelled' });
   });
 
