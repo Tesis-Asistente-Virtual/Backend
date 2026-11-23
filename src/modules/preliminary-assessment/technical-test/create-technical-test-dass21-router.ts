@@ -20,6 +20,7 @@ import { DrizzleConsentRepository } from '../../consent/infrastructure/persisten
 import { DrizzleDass21InternalResultReadUnitOfWork } from '../infrastructure/persistence/drizzle-dass21-internal-result-read-unit-of-work.js';
 import { GetMyTechnicalTestDass21Result } from './get-my-technical-test-dass21-result.js';
 import { ensureDass21TechnicalTestMapping } from './ensure-dass21-technical-test-mapping.js';
+import { isStagingLoopbackAddress, validateStagingDatabaseUrl } from '../../../shared/infrastructure/database/staging-database-safety.js';
 
 /**
  * Test-only router factory. The URL and connected server are both verified;
@@ -27,11 +28,26 @@ import { ensureDass21TechnicalTestMapping } from './ensure-dass21-technical-test
  */
 export async function createTechnicalTestDass21Router(database: NodePgDatabase<typeof schema>, jwt: JwtAccessTokenService) {
   validateTestDatabaseUrl(process.env.TEST_DATABASE_URL);
+  return createGuardedTechnicalDass21Router(database, jwt, 'tesis_test_db');
+}
+
+/** Candidate-only router for the dedicated synthetic staging entrypoint. */
+export async function createSyntheticStagingDass21Router(
+  database: NodePgDatabase<typeof schema>, jwt: JwtAccessTokenService, stagingDatabaseUrl: string | undefined,
+) {
+  validateStagingDatabaseUrl(stagingDatabaseUrl);
+  return createGuardedTechnicalDass21Router(database, jwt, 'tesis_staging_db');
+}
+
+async function createGuardedTechnicalDass21Router(
+  database: NodePgDatabase<typeof schema>, jwt: JwtAccessTokenService, expectedDatabase: 'tesis_test_db' | 'tesis_staging_db',
+) {
   const identity = await database.execute(sql`SELECT current_database() AS database_name, host(inet_server_addr()) AS server_address`);
   const target = identity.rows[0] as { database_name: string; server_address: string | null } | undefined;
   const address = target?.server_address?.replace(/\/(?:32|128)$/, '');
-  if (!target || target.database_name !== 'tesis_test_db' || !['127.0.0.1', '::1'].includes(address ?? '')) {
-    throw new Error('DASS-21 technical-test composition requires a loopback tesis_test_db connection');
+  if (!target || target.database_name !== expectedDatabase || !['127.0.0.1', '::1'].includes(address ?? '') ||
+      (expectedDatabase === 'tesis_staging_db' && !isStagingLoopbackAddress(target.server_address))) {
+    throw new Error(`DASS-21 technical composition requires a loopback ${expectedDatabase} connection`);
   }
   const underlyingCatalog = new DrizzleInstrumentCatalog(database);
   const technicalCatalog = new TechnicalTestDass21Catalog(underlyingCatalog);
