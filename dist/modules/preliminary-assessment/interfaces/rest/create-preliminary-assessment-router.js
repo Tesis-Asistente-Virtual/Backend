@@ -10,16 +10,18 @@ import { GetAssessmentInfo } from '../../application/internal/query-services/get
 import { ListMyAssessments } from '../../application/internal/query-services/list-my-assessments.js';
 import { GetMyAssessment } from '../../application/internal/query-services/get-my-assessment.js';
 import { GetMyAssessmentResult } from '../../application/internal/query-services/get-my-assessment-result.js';
+import { GetMyAssessmentForm } from '../../application/internal/query-services/get-my-assessment-form.js';
 import { StartPreliminaryAssessment } from '../../application/internal/command-services/start-preliminary-assessment.js';
 import { SubmitAssessmentResponse } from '../../application/internal/command-services/submit-assessment-response.js';
 import { ChangeAssessmentState, PauseAssessment, ResumeAssessment, WithdrawAssessment } from '../../application/internal/command-services/change-assessment-state.js';
 import { CompleteAssessment } from '../../application/internal/command-services/complete-preliminary-assessment.js';
+import { ReauthorizeAssessment } from '../../application/internal/command-services/reauthorize-assessment.js';
 import { PreliminaryAssessmentController } from './resources/preliminary-assessment-controller.js';
 export function createPreliminaryAssessmentRouter(database, jwt) {
     const router = Router();
     if (!database || !jwt) {
         for (const [method, path] of [
-            ['get', '/info'], ['post', '/'], ['get', '/'], ['get', '/:id'], ['post', '/:id/responses'],
+            ['get', '/info'], ['post', '/'], ['get', '/'], ['get', '/:id/form'], ['post', '/:id/reauthorize'], ['get', '/:id'], ['post', '/:id/responses'],
             ['post', '/:id/pause'], ['post', '/:id/resume'], ['post', '/:id/withdraw'],
             ['post', '/:id/complete'], ['get', '/:id/result'],
         ]) {
@@ -32,11 +34,13 @@ export function createPreliminaryAssessmentRouter(database, jwt) {
     const results = new DrizzleAssessmentResultRepository(database);
     const instruments = new DrizzleInstrumentCatalog(database);
     const consent = new ConsentAssessmentAuthorizer(new DrizzleConsentRepository(database));
-    const controller = new PreliminaryAssessmentController(new GetAssessmentInfo(instruments), new StartPreliminaryAssessment(assessments, instruments, consent), new ListMyAssessments(assessments), new GetMyAssessment(assessments), new SubmitAssessmentResponse(assessments, responses, instruments, consent), new PauseAssessment(new ChangeAssessmentState(assessments, consent)), new ResumeAssessment(new ChangeAssessmentState(assessments, consent)), new WithdrawAssessment(new ChangeAssessmentState(assessments, consent)), new CompleteAssessment(assessments, results, instruments, consent), new GetMyAssessmentResult(assessments, results));
+    const controller = new PreliminaryAssessmentController(new GetAssessmentInfo(instruments), new StartPreliminaryAssessment(assessments, instruments, consent), new ListMyAssessments(assessments, consent), new GetMyAssessment(assessments, consent), new GetMyAssessmentForm(assessments, instruments, consent), new SubmitAssessmentResponse(assessments, responses, instruments, consent), new PauseAssessment(new ChangeAssessmentState(assessments, consent)), new ResumeAssessment(new ChangeAssessmentState(assessments, consent)), new WithdrawAssessment(new ChangeAssessmentState(assessments, consent)), new CompleteAssessment(assessments, results, instruments, consent), new ReauthorizeAssessment(assessments, consent), new GetMyAssessmentResult(assessments, results));
     const auth = authenticationMiddleware(jwt);
     router.get('/info', auth, (req, res, next) => { void controller.assessmentInfo(req, res).catch(next); });
     router.post('/', auth, (req, res, next) => { void controller.startAssessment(req, res).catch(next); });
     router.get('/', auth, (req, res, next) => { void controller.listAssessments(req, res).catch(next); });
+    router.get('/:id/form', auth, (req, res, next) => { void controller.getAssessmentForm(req, res).catch(next); });
+    router.post('/:id/reauthorize', auth, (req, res, next) => { void controller.reauthorize(req, res).catch(next); });
     router.post('/:id/responses', auth, (req, res, next) => { void controller.submit(req, res).catch(next); });
     router.post('/:id/pause', auth, (req, res, next) => { void controller.pause(req, res).catch(next); });
     router.post('/:id/resume', auth, (req, res, next) => { void controller.resume(req, res).catch(next); });

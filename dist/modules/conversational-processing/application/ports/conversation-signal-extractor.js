@@ -12,9 +12,11 @@ export const extractConversationSignalsInputSchema = z.object({
 /** Provider-neutral and safe for application handling; never carries prompts or provider payloads. */
 export class ConversationSignalExtractionError extends Error {
     kind;
-    constructor(kind) {
+    incompleteReason;
+    constructor(kind, incompleteReason) {
         super('Conversation signal extraction failed');
         this.kind = kind;
+        this.incompleteReason = incompleteReason;
         this.name = 'ConversationSignalExtractionError';
     }
 }

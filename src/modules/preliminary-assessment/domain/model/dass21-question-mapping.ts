@@ -47,9 +47,15 @@ export function validateDass21QuestionMapping(
   if (questions.size !== 21 || mapping.entries.length !== questions.size) throw new Dass21ScoringError('invalid_instrument');
   for (const entry of mapping.entries) {
     const question = questions.get(entry.questionId);
-    if (!question || question.responseType !== 'number' || question.required !== true || question.minimum !== 0 || question.maximum !== 3) {
+    if (!question || question.required !== true || question.displayOrder !== entry.itemNumber) {
       throw new Dass21ScoringError('invalid_instrument');
     }
+    const numericQuestion = question.responseType === 'number' && question.minimum === 0 && question.maximum === 3;
+    const choiceQuestion = question.responseType === 'single_choice' && question.options.length === 4 &&
+      question.options.every(option => option.scoringValue !== undefined) &&
+      new Set(question.options.map(option => option.scoringValue)).size === 4 &&
+      [0, 1, 2, 3].every(value => question.options.some(option => option.scoringValue === value));
+    if (!numericQuestion && !choiceQuestion) throw new Dass21ScoringError('invalid_instrument');
   }
   return { ...mapping, entries: [...mapping.entries].sort((left, right) => left.itemNumber - right.itemNumber) };
 }

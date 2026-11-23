@@ -84,4 +84,12 @@ export class DrizzleDass21AssessmentScoreRepository implements Dass21AssessmentS
       return persisted;
     });
   }
+
+  async findByAssessmentForOwner(assessmentId: string, accountId: string): Promise<Dass21AssessmentScore | null> {
+    const [row] = await this.db.select().from(assessmentPsychometricScores).where(and(
+      eq(assessmentPsychometricScores.assessmentId, assessmentId),
+      eq(assessmentPsychometricScores.accountId, accountId),
+    )).limit(1);
+    return row ? toDomain(row) : null;
+  }
 }

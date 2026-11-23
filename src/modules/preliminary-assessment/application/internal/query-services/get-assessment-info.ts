@@ -1,5 +1,5 @@
 import type { InstrumentCatalog } from '../../../domain/repositories/instrument-catalog.js';
-import { isInstrumentAvailable } from '../../../domain/model/instrument.js';
+import { isInstrumentAvailable, toPublicInstrumentQuestion } from '../../../domain/model/instrument.js';
 
 export class GetAssessmentInfo {
   constructor(private readonly instruments: InstrumentCatalog, private readonly clock: () => Date = () => new Date()) {}
@@ -14,7 +14,7 @@ export class GetAssessmentInfo {
         instrumentVersionId: item.instrumentVersionId,
         version: item.version,
         effectiveAt: item.effectiveAt,
-        questions: item.questions,
+        questions: item.questions.map(toPublicInstrumentQuestion),
       })),
     };
   }

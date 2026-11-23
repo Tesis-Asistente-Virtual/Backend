@@ -24,14 +24,6 @@ function generationLimits(configuration: OpenAiConfiguration) {
   };
 }
 
-function resultUsage(response: OpenAI.Responses.Response): AiTextGenerationResult['usage'] {
-  return response.usage ? {
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-    totalTokens: response.usage.total_tokens,
-  } : undefined;
-}
-
 type UnknownRecord = Record<string, unknown>;
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -74,17 +66,21 @@ function validateOutputItems(value: unknown): UnknownRecord[] {
   return items;
 }
 
-function extractCompletedText(responseValue: unknown): { readonly text: string; readonly response: UnknownRecord } {
+function extractCompletedText(responseValue: unknown, requireOutputText = false): { readonly text: string; readonly response: UnknownRecord } {
   if (!isRecord(responseValue)) throw invalidResponse('final_text_validation');
   const response = responseValue;
   if (typeof response.status !== 'string') throw invalidResponse('final_text_validation');
-  if (response.status !== 'completed') {
+  if (response.status === 'incomplete') {
     const reason = isRecord(response.incomplete_details) && response.incomplete_details.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
     throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', reason, 'final_text_validation');
   }
+  if (response.status === 'failed') {
+    throw new OpenAiTextGenerationError('provider', 'Text generation provider failed the response', undefined, 'final_text_validation');
+  }
+  if (response.status !== 'completed') throw invalidResponse('final_text_validation');
   if (!Object.hasOwn(response, 'error')) throw invalidResponse('final_text_validation');
   if (response.error !== null) {
-    throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', undefined, 'final_text_validation');
+    throw invalidResponse('final_text_validation');
   }
 
   const outputItems = validateOutputItems(response.output);
@@ -92,6 +88,8 @@ function extractCompletedText(responseValue: unknown): { readonly text: string; 
   if (Object.hasOwn(response, 'output_text')) {
     if (typeof response.output_text !== 'string') throw invalidResponse('final_text_validation');
     text = response.output_text;
+  } else if (requireOutputText) {
+    throw invalidResponse('final_text_validation');
   } else {
     text = outputItems.flatMap(item => item.content as UnknownRecord[])
       .filter(part => part.type === 'output_text')
@@ -197,12 +195,8 @@ export class OpenAiTextGenerator implements AiTextGenerator {
       throw mapProviderError(error);
     }
 
-    if (response.status !== 'completed' || response.error !== null) {
-      throw new OpenAiTextGenerationError('invalid_response', 'Text generation provider did not complete the response');
-    }
-    const text = response.output_text.trim();
-    if (!text) throw new OpenAiTextGenerationError('invalid_response', 'Text generation provider returned empty text');
-    const usage = resultUsage(response);
+    const { text, response: validatedResponse } = extractCompletedText(response, true);
+    const usage = validateUsage(validatedResponse.usage);
     return { text, ...(usage ? { usage } : {}) };
   }
 

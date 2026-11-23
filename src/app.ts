@@ -10,7 +10,10 @@ import { consentRouter } from './modules/consent/interfaces/rest/consent-routes.
 import { preliminaryAssessmentsRouter } from './modules/preliminary-assessment/interfaces/rest/preliminary-assessment-routes.js';
 import { monitoringRouter } from './modules/longitudinal-monitoring/interfaces/rest/monitoring-routes.js';
 import { conversationSignalExtractionRouter } from './modules/conversational-processing/interfaces/rest/conversation-signal-extraction-routes.js';
+import { env } from './config/env.js';
+import { createCorsMiddleware } from './shared/infrastructure/http/cors-middleware.js';
 export const app = express();
+app.use(createCorsMiddleware(env.corsAllowedOrigins));
 app.use(express.json());
 app.use(openApiRouter);
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));

@@ -92,6 +92,19 @@ export function resumeAssessment(assessment, at) {
         throw new PreliminaryAssessmentError('invalid_transition');
     return transition(assessment, 'in_progress', at);
 }
+/** Rebinds an open assessment only after the caller has observed a fresh explicit grant. */
+export function reauthorizeAssessment(assessment, noticeVersionId, at) {
+    if (assessment.status !== 'in_progress' && assessment.status !== 'paused') {
+        throw new PreliminaryAssessmentError('assessment_closed');
+    }
+    if (!z.string().uuid().safeParse(noticeVersionId).success)
+        throw new PreliminaryAssessmentError('consent_required');
+    if (assessment.consentNoticeVersionId === noticeVersionId)
+        return assessment;
+    if (Number.isNaN(at.getTime()) || at < assessment.updatedAt)
+        throw new PreliminaryAssessmentError('invalid_transition');
+    return freezeAssessment({ ...assessment, consentNoticeVersionId: noticeVersionId, updatedAt: at });
+}
 export function withdrawAssessment(assessment, at) {
     if (assessment.status !== 'in_progress' && assessment.status !== 'paused')
         throw new PreliminaryAssessmentError('invalid_transition');

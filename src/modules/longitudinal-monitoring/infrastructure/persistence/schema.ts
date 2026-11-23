@@ -12,6 +12,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
+import { conversations } from '../../../conversations/infrastructure/persistence/schema.js';
 
 export const monitoringEnrollments = pgTable('monitoring_enrollments', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -60,6 +61,31 @@ export const monitoringSessions = pgTable('monitoring_sessions', {
   check('monitoring_sessions_time_ck', sql`${table.openedAt} <= ${table.updatedAt} and (${table.closedAt} is null or ${table.closedAt} >= ${table.openedAt})`),
   check('monitoring_sessions_closed_state_ck', sql`(${table.status} = 'in_progress' and ${table.closedAt} is null) or (${table.status} in ('completed', 'abandoned') and ${table.closedAt} is not null)`),
   uniqueIndex('monitoring_sessions_id_owner_uq').on(table.id, table.accountId),
+  unique('monitoring_sessions_id_enrollment_owner_uq').on(table.id, table.enrollmentId, table.accountId),
   uniqueIndex('monitoring_sessions_one_open_uq').on(table.enrollmentId, table.accountId).where(sql`${table.status} = 'in_progress'`),
   index('monitoring_sessions_owner_enrollment_idx').on(table.accountId, table.enrollmentId, table.openedAt, table.id),
+]);
+
+/** Stores only the explicit relationship; conversation messages are never copied here. */
+export const monitoringSessionConversations = pgTable('monitoring_session_conversations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  monitoringSessionId: uuid('monitoring_session_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  accountId: uuid('account_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  foreignKey({
+    name: 'monitoring_session_conversations_session_owner_fk',
+    columns: [table.monitoringSessionId, table.enrollmentId, table.accountId],
+    foreignColumns: [monitoringSessions.id, monitoringSessions.enrollmentId, monitoringSessions.accountId],
+  }).onDelete('cascade'),
+  foreignKey({
+    name: 'monitoring_session_conversations_conversation_owner_fk',
+    columns: [table.conversationId, table.accountId],
+    foreignColumns: [conversations.id, conversations.accountId],
+  }).onDelete('cascade'),
+  unique('monitoring_session_conversations_session_uq').on(table.monitoringSessionId),
+  unique('monitoring_session_conversations_conversation_uq').on(table.conversationId),
+  index('monitoring_session_conversations_owner_enrollment_idx').on(table.accountId, table.enrollmentId, table.createdAt),
 ]);

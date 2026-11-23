@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { assessmentAnswerSchema } from '../../domain/model/assessment-response.js';
-import { instrumentQuestionSchema } from '../../domain/model/instrument.js';
+import { publicInstrumentQuestionSchema } from '../../domain/model/instrument.js';
 import { startAssessmentBodySchema, submitAssessmentResponseBodySchema } from './validation/assessment-request-schemas.js';
 const toSchema = (value) => z.toJSONSchema(value, { target: 'openapi-3.0' });
 const security = [{ bearerAuth: [] }];
@@ -44,6 +44,12 @@ const pageSchema = (item) => ({
     required: ['items', 'pagination'], additionalProperties: false,
 });
 const response = (description, ref) => ({ description, content: { 'application/json': { schema: { $ref: ref } } } });
+const orderedInstrumentQuestion = {
+    allOf: [
+        toSchema(publicInstrumentQuestionSchema),
+        { type: 'object', properties: { displayOrder: { type: 'integer', minimum: 1, maximum: 200 } }, required: ['displayOrder'] },
+    ],
+};
 export const preliminaryAssessmentSchemas = {
     StartAssessmentRequest: toSchema(startAssessmentBodySchema),
     SubmitAssessmentResponseRequest: toSchema(submitAssessmentResponseBodySchema),
@@ -52,6 +58,16 @@ export const preliminaryAssessmentSchemas = {
     AssessmentResponseItem: toSchema(answerResource),
     AssessmentPage: pageSchema(assessmentResource),
     AssessmentResult: toSchema(resultResource),
+    AssessmentForm: {
+        type: 'object', properties: {
+            assessment: { $ref: '#/components/schemas/AssessmentResponse' },
+            instrument: { type: 'object', properties: {
+                    instrumentId: { type: 'string', format: 'uuid' }, instrumentVersionId: { type: 'string', format: 'uuid' },
+                    version: { type: 'string' }, effectiveAt: { type: 'string', format: 'date-time' },
+                    questions: { type: 'array', items: orderedInstrumentQuestion },
+                }, required: ['instrumentId', 'instrumentVersionId', 'version', 'effectiveAt', 'questions'], additionalProperties: false },
+        }, required: ['assessment', 'instrument'], additionalProperties: false,
+    },
     AssessmentInfo: {
         type: 'object',
         properties: {
@@ -60,7 +76,7 @@ export const preliminaryAssessmentSchemas = {
                     type: 'object', properties: {
                         instrumentId: { type: 'string', format: 'uuid' }, instrumentVersionId: { type: 'string', format: 'uuid' },
                         version: { type: 'string' }, effectiveAt: { type: 'string', format: 'date-time' },
-                        questions: { type: 'array', items: toSchema(instrumentQuestionSchema) },
+                        questions: { type: 'array', items: orderedInstrumentQuestion },
                     }, required: ['instrumentId', 'instrumentVersionId', 'version', 'effectiveAt', 'questions'], additionalProperties: false,
                 } },
         }, required: ['assessmentAvailable', 'mode', 'instruments'], additionalProperties: false,
@@ -86,7 +102,9 @@ export const preliminaryAssessmentPaths = {
             responses: { '201': response('Evaluación iniciada', '#/components/schemas/AssessmentResponse'), ...standardErrors },
         },
         get: {
-            tags: ['Preliminary Assessment'], summary: 'Listar evaluaciones propias', security, parameters: pagination,
+            tags: ['Preliminary Assessment'], summary: 'Listar evaluaciones propias',
+            description: 'En evaluaciones abiertas, las respuestas guardadas se incluyen solo si el consentimiento vigente coincide con el aviso asociado; ante ausencia o fallo de autorización se conserva el metadato y se omite el contenido de respuestas.',
+            security, parameters: pagination,
             responses: { '200': response('Historial paginado', '#/components/schemas/AssessmentPage'), ...errorResponses(['400', '401', '500']) },
         },
     },
@@ -94,6 +112,22 @@ export const preliminaryAssessmentPaths = {
         get: {
             tags: ['Preliminary Assessment'], summary: 'Consultar una evaluación propia', security, parameters: [idParam],
             responses: { '200': response('Evaluación', '#/components/schemas/AssessmentResponse'), ...errorResponses(['400', '401', '404', '500']) },
+        },
+    },
+    '/api/v1/preliminary-assessments/{id}/form': {
+        get: {
+            tags: ['Preliminary Assessment'], summary: 'Recuperar formulario versionado y progreso propio',
+            description: 'Solo para evaluaciones abiertas del propietario y con consentimiento vigente que coincida con la versión fijada. Las preguntas se ordenan por displayOrder persistido en la versión.',
+            security, parameters: [idParam],
+            responses: { '200': response('Formulario fijado y respuestas actuales', '#/components/schemas/AssessmentForm'), ...standardErrors },
+        },
+    },
+    '/api/v1/preliminary-assessments/{id}/reauthorize': {
+        post: {
+            tags: ['Preliminary Assessment'], summary: 'Vincular evaluación abierta a consentimiento vigente',
+            description: 'Requiere que el titular haya registrado previamente una concesión expresa para la versión actualmente publicada de preliminary_assessment. No reactiva evaluaciones cerradas ni acepta consentimiento por cuenta del usuario.',
+            security, parameters: [idParam], requestBody: { required: false, content: { 'application/json': { schema: { type: 'object', properties: {}, additionalProperties: false } } } },
+            responses: { '200': response('Evaluación abierta autorizada con la decisión vigente', '#/components/schemas/AssessmentResponse'), ...standardErrors },
         },
     },
     '/api/v1/preliminary-assessments/{id}/responses': {

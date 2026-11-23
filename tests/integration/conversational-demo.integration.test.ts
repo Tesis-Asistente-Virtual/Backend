@@ -264,6 +264,18 @@ demoDescribe('isolated conversational demo HTTP + PostgreSQL', () => {
         extractorVersion: string; sourceMessageIds: string[];
         summary: { descriptiveStatus: string; reportedFacts: unknown[]; emptyObservationsMeaning: string; interpretationLimits: string[] };
         missingInformation: unknown[];
+        clarificationQuestions: string[];
+        observations: Array<{ evidence: string; sourceMessageIds: string[] }>;
+        preliminaryGuidance: {
+          contractVersion: string;
+          conversationId: string;
+          sourceMessageIds: string[];
+          observations: Array<{ sourceObservationIndex: number; field: string; text: string; sourceMessageIds: string[] }>;
+          informationGaps: unknown[];
+          suggestedFollowUpQuestions: string[];
+          generalGuidance: string;
+          limitations: string[];
+        };
       };
       expect(result).toMatchObject({
         status: 'completed', conversationId: conversation.id, extractorVersion: '1.0.0', sourceMessageIds,
@@ -271,6 +283,43 @@ demoDescribe('isolated conversational demo HTTP + PostgreSQL', () => {
       });
       expect(result.summary.reportedFacts.length).toBeGreaterThan(0);
       expect(result.missingInformation).toHaveLength(1);
+      expect(result.clarificationQuestions).toEqual(['¿Desde cuándo ocurre esta dificultad ficticia?']);
+      expect(result.preliminaryGuidance).toMatchObject({
+        contractVersion: '1.0',
+        conversationId: conversation.id,
+        sourceMessageIds,
+        informationGaps: [{ field: 'duration', reason: 'not_reported' }],
+        suggestedFollowUpQuestions: ['¿Desde cuándo ocurre esta dificultad ficticia?'],
+        generalGuidance: 'Puedes revisar o corregir estas observaciones. Si algo importante no aparece, puedes compartirlo solo si así lo deseas.',
+        limitations: [
+          'Este resumen se basa únicamente en los mensajes seleccionados.',
+          'Las observaciones pueden no representar todo lo que quisiste expresar; puedes corregirlas.',
+          'No es una evaluación ni un diagnóstico clínico y no calcula puntuaciones o niveles de severidad.',
+          'No evalúa seguridad; una respuesta vacía o incompleta no demuestra ausencia de dificultades ni de riesgo.',
+        ],
+      });
+      expect(result.preliminaryGuidance.observations).toEqual([
+        expect.objectContaining({
+          sourceObservationIndex: 0,
+          field: 'manifestation',
+          text: 'Dificultad ficticia para organizar tareas académicas.',
+          sourceMessageIds,
+        }),
+        expect.objectContaining({
+          sourceObservationIndex: 0,
+          field: 'context',
+          contextDomain: 'academic',
+          text: 'Proyecto de clase sintético.',
+          sourceMessageIds,
+        }),
+      ]);
+      expect(result.preliminaryGuidance.observations).toHaveLength(2);
+      expect(result.observations.every(item => item.evidence === 'reported')).toBe(true);
+      expect(result.observations.every(item => item.sourceMessageIds.every(id => sourceMessageIds.includes(id)))).toBe(true);
+      expect(result.preliminaryGuidance.observations.every(item => item.sourceMessageIds.every(id => sourceMessageIds.includes(id)))).toBe(true);
+      expect(result).not.toHaveProperty('diagnosis');
+      expect(result).not.toHaveProperty('scores');
+      expect(result).not.toHaveProperty('dass21');
       expect(result).not.toHaveProperty('accountId');
       expect(extractorCalls).toBe(2);
 

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, foreignKey, index, jsonb, pgTable, primaryKey, timestamp, unique, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
+import { check, foreignKey, index, jsonb, pgTable, primaryKey, smallint, timestamp, unique, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
 import { consentNoticeVersions } from '../../../consent/infrastructure/persistence/schema.js';
 export const assessmentInstrumentVersions = pgTable('assessment_instrument_versions', {
@@ -27,11 +27,42 @@ export const assessmentInstrumentVersions = pgTable('assessment_instrument_versi
 export const assessmentInstrumentQuestions = pgTable('assessment_instrument_questions', {
     instrumentVersionId: uuid('instrument_version_id').notNull().references(() => assessmentInstrumentVersions.instrumentVersionId, { onDelete: 'cascade' }),
     questionId: uuid('question_id').notNull(),
+    displayOrder: smallint('display_order'),
     definition: jsonb('definition').$type().notNull(),
 }, table => [
     primaryKey({ name: 'assessment_instrument_questions_pk', columns: [table.instrumentVersionId, table.questionId] }),
     index('assessment_instrument_questions_version_idx').on(table.instrumentVersionId),
+    uniqueIndex('assessment_instrument_questions_order_uq').on(table.instrumentVersionId, table.displayOrder).where(sql `${table.displayOrder} IS NOT NULL`),
+    check('assessment_instrument_question_display_order_check', sql `${table.displayOrder} IS NULL OR ${table.displayOrder} BETWEEN 1 AND 200`),
     check('assessment_instrument_question_definition_check', sql `jsonb_typeof(${table.definition}) = 'object' AND ${table.definition}->>'id' IS NOT NULL AND ${table.definition}->>'id' = ${table.questionId}::text`),
+]);
+export const assessmentScoringMappingVersions = pgTable('assessment_scoring_mapping_versions', {
+    mappingId: uuid('mapping_id').defaultRandom().primaryKey(),
+    instrumentId: uuid('instrument_id').notNull(),
+    instrumentVersionId: uuid('instrument_version_id').notNull(),
+    mappingVersion: varchar('mapping_version', { length: 40 }).notNull(),
+    status: varchar('status', { length: 20 }).$type().notNull().default('draft'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+}, table => [
+    unique('assessment_scoring_mapping_version_uq').on(table.instrumentVersionId, table.mappingVersion),
+    unique('assessment_scoring_mapping_identity_uq').on(table.mappingId, table.instrumentVersionId, table.instrumentId),
+    foreignKey({ name: 'assessment_scoring_mapping_instrument_fk', columns: [table.instrumentVersionId, table.instrumentId], foreignColumns: [assessmentInstrumentVersions.instrumentVersionId, assessmentInstrumentVersions.instrumentId] }).onDelete('restrict'),
+    check('assessment_scoring_mapping_status_check', sql `${table.status} in ('draft', 'frozen')`),
+    check('assessment_scoring_mapping_frozen_check', sql `(${table.status} = 'frozen') = (${table.frozenAt} IS NOT NULL)`),
+]);
+export const assessmentScoringItemMappings = pgTable('assessment_scoring_item_mappings', {
+    mappingId: uuid('mapping_id').notNull(),
+    instrumentId: uuid('instrument_id').notNull(),
+    instrumentVersionId: uuid('instrument_version_id').notNull(),
+    questionId: uuid('question_id').notNull(),
+    itemNumber: smallint('item_number').notNull(),
+}, table => [
+    primaryKey({ name: 'assessment_scoring_item_mapping_pk', columns: [table.mappingId, table.questionId] }),
+    unique('assessment_scoring_item_mapping_item_uq').on(table.mappingId, table.itemNumber),
+    foreignKey({ name: 'assessment_scoring_item_mapping_version_fk', columns: [table.mappingId, table.instrumentVersionId, table.instrumentId], foreignColumns: [assessmentScoringMappingVersions.mappingId, assessmentScoringMappingVersions.instrumentVersionId, assessmentScoringMappingVersions.instrumentId] }).onDelete('cascade'),
+    foreignKey({ name: 'assessment_scoring_item_mapping_question_fk', columns: [table.instrumentVersionId, table.questionId], foreignColumns: [assessmentInstrumentQuestions.instrumentVersionId, assessmentInstrumentQuestions.questionId] }).onDelete('restrict'),
+    check('assessment_scoring_item_mapping_number_check', sql `${table.itemNumber} between 1 and 21`),
 ]);
 export const preliminaryAssessments = pgTable('preliminary_assessments', {
     assessmentId: uuid('assessment_id').defaultRandom().primaryKey(),
@@ -48,6 +79,7 @@ export const preliminaryAssessments = pgTable('preliminary_assessments', {
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, table => [
     unique('preliminary_assessments_id_instrument_version_uq').on(table.assessmentId, table.instrumentVersionId),
+    unique('preliminary_assessments_id_account_uq').on(table.assessmentId, table.accountId),
     index('preliminary_assessments_account_created_idx').on(table.accountId, table.createdAt.desc(), table.assessmentId),
     check('preliminary_assessment_status_check', sql `${table.status} in ('in_progress', 'paused', 'completed', 'withdrawn', 'expired')`),
     check('preliminary_assessment_mode_check', sql `${table.mode} in ('conversational_contextual', 'structured_instrument')`),
@@ -92,4 +124,37 @@ export const assessmentResults = pgTable('assessment_results', {
     check('assessment_result_interpretation_unavailable_check', sql `jsonb_typeof(${table.interpretation}) = 'object' AND ${table.interpretation}->>'status' IS NOT NULL AND ${table.interpretation}->>'status' = 'not_available'`),
     check('assessment_result_priority_unavailable_check', sql `jsonb_typeof(${table.attentionPriority}) = 'object' AND ${table.attentionPriority}->>'status' IS NOT NULL AND ${table.attentionPriority}->>'status' = 'not_available'`),
     check('assessment_result_safety_unassessed_check', sql `jsonb_typeof(${table.safetyState}) = 'object' AND ${table.safetyState}->>'status' IS NOT NULL AND ${table.safetyState}->>'status' = 'not_available' AND ${table.safetyState}->>'reason' IS NOT NULL AND ${table.safetyState}->>'reason' = 'not_assessed'`),
+]);
+/** Psychometric scores are stored separately and are deliberately excluded from public /result DTOs. */
+export const assessmentPsychometricScores = pgTable('assessment_psychometric_scores', {
+    scoreId: uuid('score_id').defaultRandom().primaryKey(),
+    assessmentId: uuid('assessment_id').notNull(),
+    accountId: uuid('account_id').notNull(),
+    instrumentId: uuid('instrument_id').notNull(),
+    instrumentVersionId: uuid('instrument_version_id').notNull(),
+    mappingId: uuid('mapping_id').notNull(),
+    mappingVersion: varchar('mapping_version', { length: 40 }).notNull(),
+    scoringVersion: varchar('scoring_version', { length: 40 }).notNull(),
+    schemaVersion: varchar('schema_version', { length: 20 }).notNull(),
+    status: varchar('status', { length: 20 }).$type().notNull(),
+    depressionRawScore: smallint('depression_raw_score').notNull(),
+    depressionEquivalentScore: smallint('depression_equivalent_score').notNull(),
+    anxietyRawScore: smallint('anxiety_raw_score').notNull(),
+    anxietyEquivalentScore: smallint('anxiety_equivalent_score').notNull(),
+    stressRawScore: smallint('stress_raw_score').notNull(),
+    stressEquivalentScore: smallint('stress_equivalent_score').notNull(),
+    calculatedAt: timestamp('calculated_at', { withTimezone: true }).notNull(),
+}, table => [
+    uniqueIndex('assessment_psychometric_scores_assessment_uq').on(table.assessmentId),
+    foreignKey({ name: 'assessment_psychometric_scores_assessment_owner_fk', columns: [table.assessmentId, table.accountId], foreignColumns: [preliminaryAssessments.assessmentId, preliminaryAssessments.accountId] }).onDelete('cascade'),
+    foreignKey({ name: 'assessment_psychometric_scores_assessment_version_fk', columns: [table.assessmentId, table.instrumentVersionId], foreignColumns: [preliminaryAssessments.assessmentId, preliminaryAssessments.instrumentVersionId] }).onDelete('cascade'),
+    foreignKey({ name: 'assessment_psychometric_scores_instrument_fk', columns: [table.instrumentVersionId, table.instrumentId], foreignColumns: [assessmentInstrumentVersions.instrumentVersionId, assessmentInstrumentVersions.instrumentId] }).onDelete('restrict'),
+    foreignKey({ name: 'assessment_psychometric_scores_mapping_fk', columns: [table.mappingId, table.instrumentVersionId, table.instrumentId], foreignColumns: [assessmentScoringMappingVersions.mappingId, assessmentScoringMappingVersions.instrumentVersionId, assessmentScoringMappingVersions.instrumentId] }).onDelete('restrict'),
+    check('assessment_psychometric_scores_status_check', sql `${table.status} = 'calculated'`),
+    check('assessment_psychometric_scores_schema_check', sql `${table.schemaVersion} = '1.0'`),
+    check('assessment_psychometric_scores_mapping_version_check', sql `length(trim(${table.mappingVersion})) > 0 AND length(trim(${table.scoringVersion})) > 0`),
+    check('assessment_psychometric_scores_depression_check', sql `${table.depressionRawScore} between 0 and 21 AND ${table.depressionEquivalentScore} = ${table.depressionRawScore} * 2`),
+    check('assessment_psychometric_scores_anxiety_check', sql `${table.anxietyRawScore} between 0 and 21 AND ${table.anxietyEquivalentScore} = ${table.anxietyRawScore} * 2`),
+    check('assessment_psychometric_scores_stress_check', sql `${table.stressRawScore} between 0 and 21 AND ${table.stressEquivalentScore} = ${table.stressRawScore} * 2`),
+    index('assessment_psychometric_scores_owner_time_idx').on(table.accountId, table.calculatedAt.desc(), table.scoreId),
 ]);

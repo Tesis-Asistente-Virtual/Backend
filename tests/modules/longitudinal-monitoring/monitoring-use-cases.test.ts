@@ -2,18 +2,22 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { ChangeMonitoringEnrollmentState } from '../../../src/modules/longitudinal-monitoring/application/internal/command-services/change-monitoring-enrollment-state.js';
 import { CreateMonitoringSession } from '../../../src/modules/longitudinal-monitoring/application/internal/command-services/create-monitoring-session.js';
+import { AssociateConversationWithMonitoringSession } from '../../../src/modules/longitudinal-monitoring/application/internal/command-services/associate-conversation-with-monitoring-session.js';
 import { StartMonitoringEnrollment } from '../../../src/modules/longitudinal-monitoring/application/internal/command-services/start-monitoring-enrollment.js';
 import { GetMonitoringInfo } from '../../../src/modules/longitudinal-monitoring/application/internal/query-services/get-monitoring-info.js';
 import { GetMyMonitoringEnrollment } from '../../../src/modules/longitudinal-monitoring/application/internal/query-services/get-my-monitoring-enrollment.js';
 import { ListMyMonitoringSessions } from '../../../src/modules/longitudinal-monitoring/application/internal/query-services/list-my-monitoring-sessions.js';
 import type { MonitoringConsentAuthorizer } from '../../../src/modules/longitudinal-monitoring/application/ports/monitoring-consent-authorizer.js';
+import type { MonitoringConversationAssociationScope } from '../../../src/modules/longitudinal-monitoring/application/ports/monitoring-conversation-association-scope.js';
 import { MonitoringError } from '../../../src/modules/longitudinal-monitoring/domain/model/monitoring-errors.js';
 import { createMonitoringEnrollment, monitoringConsentPurpose, monitoringContractVersion, pauseMonitoring, startMonitoringSession, withdrawMonitoring, type MonitoringEnrollment, type MonitoringSession } from '../../../src/modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
 import type { MonitoringEnrollmentRepository } from '../../../src/modules/longitudinal-monitoring/domain/repositories/monitoring-enrollment-repository.js';
 import type { MonitoringSessionRepository } from '../../../src/modules/longitudinal-monitoring/domain/repositories/monitoring-session-repository.js';
-import { monitoringEnrollmentIdParamsSchema, monitoringPaginationSchema, startMonitoringEnrollmentBodySchema } from '../../../src/modules/longitudinal-monitoring/interfaces/rest/validation/monitoring-request-schemas.js';
+import type { MonitoringConversationAssociationRepository } from '../../../src/modules/longitudinal-monitoring/domain/repositories/monitoring-conversation-association-repository.js';
+import { associateMonitoringConversationBodySchema, monitoringEnrollmentIdParamsSchema, monitoringPaginationSchema, monitoringSessionConversationParamsSchema, startMonitoringEnrollmentBodySchema } from '../../../src/modules/longitudinal-monitoring/interfaces/rest/validation/monitoring-request-schemas.js';
 import { openApiDocument } from '../../../src/shared/infrastructure/http/openapi-document.js';
 import { monitoringPaths } from '../../../src/modules/longitudinal-monitoring/interfaces/rest/openapi.js';
+import { DenyUnapprovedMonitoringConversationAssociation } from '../../../src/modules/longitudinal-monitoring/infrastructure/persistence/deny-unapproved-monitoring-conversation-association.js';
 
 const accountId = randomUUID();
 const noticeId = randomUUID();
@@ -41,6 +45,10 @@ function enrollmentRepository(overrides: Partial<MonitoringEnrollmentRepository>
 
 function consent(overrides: Partial<MonitoringConsentAuthorizer> = {}): MonitoringConsentAuthorizer {
   return { getCurrentAuthorization: vi.fn(async () => granted), ...overrides };
+}
+
+function associationScope(allowed = true): MonitoringConversationAssociationScope {
+  return { isNoticeApprovedForAssociation: vi.fn(async () => allowed) };
 }
 
 describe('LongitudinalMonitoring application and REST contracts', () => {
@@ -163,6 +171,93 @@ describe('LongitudinalMonitoring application and REST contracts', () => {
     expect(sessions.createWithCurrentConsent).not.toHaveBeenCalled();
   });
 
+  it('associates one explicitly selected conversation to an owner session using metadata only', async () => {
+    const active = enrollment();
+    const session = startMonitoringSession(active, randomUUID(), new Date(time.getTime() + 1000));
+    const conversationId = randomUUID();
+    const association = {
+      contractVersion: '1.0' as const, associationId: randomUUID(), enrollmentId: active.enrollmentId,
+      monitoringSessionId: session.sessionId, conversationId, accountId, createdAt: new Date(time.getTime() + 2000),
+    };
+    const enrollments = enrollmentRepository({ findByIdForOwner: vi.fn(async () => active) });
+    const associations: MonitoringConversationAssociationRepository = {
+      createWithCurrentConsent: vi.fn(async () => association),
+    };
+    const authorizer = consent({ getCurrentAuthorization: vi.fn(async () => ({ ...granted, checkedAt: new Date(time.getTime() + 1500) })) });
+    const useCase = new AssociateConversationWithMonitoringSession(enrollments, associations, authorizer, associationScope(), () => new Date(time.getTime() + 2000), () => association.associationId);
+
+    await expect(useCase.execute(accountId, {
+      enrollmentId: active.enrollmentId, monitoringSessionId: session.sessionId,
+      conversationId, explicitAssociation: true,
+    })).resolves.toEqual(association);
+    expect(associations.createWithCurrentConsent).toHaveBeenCalledWith({
+      associationId: association.associationId,
+      enrollmentId: active.enrollmentId,
+      monitoringSessionId: session.sessionId,
+      conversationId,
+      accountId,
+      consentNoticeVersionId: noticeId,
+      createdAt: new Date(time.getTime() + 2000),
+    });
+    expect(enrollments.findByIdForOwner).toHaveBeenCalledWith(active.enrollmentId, accountId);
+    expect(authorizer.getCurrentAuthorization).toHaveBeenCalledWith(accountId);
+  });
+
+  it.each([
+    ['missing', null],
+    ['withdrawn', { ...granted, state: 'withdrawn' as const }],
+    ['declined', { ...granted, state: 'declined' as const }],
+    ['superseded notice', { ...granted, state: 'renewal_required' as const, noticeVersionId: null }],
+    ['different notice version', { ...granted, noticeVersionId: randomUUID() }],
+  ])('does not write a conversation link when monitoring consent is %s', async (_label, authorization) => {
+    const active = enrollment();
+    const associations: MonitoringConversationAssociationRepository = { createWithCurrentConsent: vi.fn(async () => { throw new Error('must not be called'); }) };
+    const useCase = new AssociateConversationWithMonitoringSession(
+      enrollmentRepository({ findByIdForOwner: vi.fn(async () => active) }),
+      associations,
+      consent({ getCurrentAuthorization: vi.fn(async () => authorization) }),
+      associationScope(),
+    );
+    await expect(useCase.execute(accountId, {
+      enrollmentId: active.enrollmentId, monitoringSessionId: randomUUID(), conversationId: randomUUID(), explicitAssociation: true,
+    })).rejects.toMatchObject({ code: 'consent_required' });
+    expect(associations.createWithCurrentConsent).not.toHaveBeenCalled();
+  });
+
+  it('fails closed on consent lookup failure and rejects foreign enrollment or implicit association requests', async () => {
+    const associations: MonitoringConversationAssociationRepository = { createWithCurrentConsent: vi.fn() };
+    const request = { enrollmentId: randomUUID(), monitoringSessionId: randomUUID(), conversationId: randomUUID(), explicitAssociation: true };
+    const missing = new AssociateConversationWithMonitoringSession(enrollmentRepository(), associations, consent(), associationScope());
+    await expect(missing.execute(accountId, request)).rejects.toMatchObject({ code: 'enrollment_not_found' });
+    expect(associations.createWithCurrentConsent).not.toHaveBeenCalled();
+
+    const active = enrollment();
+    const brokenConsent = new AssociateConversationWithMonitoringSession(
+      enrollmentRepository({ findByIdForOwner: vi.fn(async () => active) }), associations,
+      consent({ getCurrentAuthorization: vi.fn(async () => { throw new Error('private consent detail'); }) }),
+      associationScope(),
+    );
+    await expect(brokenConsent.execute(accountId, request)).rejects.toMatchObject({ code: 'consent_unavailable' });
+    await expect(brokenConsent.execute(accountId, { ...request, accountId })).rejects.toThrow();
+    await expect(brokenConsent.execute(accountId, { ...request, explicitAssociation: false })).rejects.toThrow();
+    expect(associations.createWithCurrentConsent).not.toHaveBeenCalled();
+  });
+
+  it('blocks an otherwise current grant unless that exact notice version is reviewed for association', async () => {
+    const active = enrollment();
+    const repository: MonitoringConversationAssociationRepository = { createWithCurrentConsent: vi.fn() };
+    const scope = associationScope(false);
+    const useCase = new AssociateConversationWithMonitoringSession(
+      enrollmentRepository({ findByIdForOwner: vi.fn(async () => active) }), repository, consent(), scope,
+    );
+    await expect(useCase.execute(accountId, {
+      enrollmentId: active.enrollmentId, monitoringSessionId: randomUUID(), conversationId: randomUUID(), explicitAssociation: true,
+    })).rejects.toMatchObject({ code: 'conversation_association_not_authorized' });
+    expect(scope.isNoticeApprovedForAssociation).toHaveBeenCalledWith(noticeId);
+    expect(repository.createWithCurrentConsent).not.toHaveBeenCalled();
+    await expect(new DenyUnapprovedMonitoringConversationAssociation().isNoticeApprovedForAssociation(noticeId)).resolves.toBe(false);
+  });
+
   it('requires owner scope before listing sessions and reports monitoring capabilities honestly', async () => {
     const enrollments = enrollmentRepository({ findByIdForOwner: vi.fn(async () => null) });
     const sessions: MonitoringSessionRepository = {
@@ -180,12 +275,16 @@ describe('LongitudinalMonitoring application and REST contracts', () => {
     expect(startMonitoringEnrollmentBodySchema.safeParse({ explicitOptIn: true, accountId }).success).toBe(false);
     expect(startMonitoringEnrollmentBodySchema.safeParse({ explicitOptIn: false }).success).toBe(false);
     expect(monitoringEnrollmentIdParamsSchema.safeParse({ id: 'nope' }).success).toBe(false);
+    expect(monitoringSessionConversationParamsSchema.safeParse({ id: randomUUID(), sessionId: randomUUID() }).success).toBe(true);
+    expect(monitoringSessionConversationParamsSchema.safeParse({ id: randomUUID(), sessionId: 'bad' }).success).toBe(false);
+    expect(associateMonitoringConversationBodySchema.safeParse({ conversationId: randomUUID(), explicitAssociation: true }).success).toBe(true);
+    expect(associateMonitoringConversationBodySchema.safeParse({ conversationId: randomUUID(), explicitAssociation: true, accountId }).success).toBe(false);
     expect(monitoringPaginationSchema.parse({}).limit).toBe(20);
     expect(monitoringPaginationSchema.safeParse({ limit: '100' }).success).toBe(false);
     expect(monitoringPaginationSchema.safeParse({ limit: '2', unexpected: 'x' }).success).toBe(false);
-    expect(Object.keys(openApiDocument.paths).filter((path) => path.startsWith('/api/v1/monitoring/'))).toHaveLength(8);
+    expect(Object.keys(openApiDocument.paths).filter((path) => path.startsWith('/api/v1/monitoring/'))).toHaveLength(9);
     const operations = Object.values(monitoringPaths).flatMap((path) => Object.values(path));
-    expect(operations).toHaveLength(10);
+    expect(operations).toHaveLength(11);
     for (const operation of operations) expect(operation).toHaveProperty('security', [{ bearerAuth: [] }]);
   });
 });

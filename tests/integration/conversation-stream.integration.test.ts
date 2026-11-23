@@ -21,6 +21,7 @@ import { ListConversationMessages } from '../../src/modules/conversations/applic
 import { JwtAccessTokenService } from '../../src/modules/authentication/infrastructure/security/jwt-access-token-service.js';
 import { authenticationMiddleware } from '../../src/shared/infrastructure/http/authentication-middleware.js';
 import { errorHandler } from '../../src/shared/infrastructure/http/error-handler.js';
+import { createCorsMiddleware } from '../../src/shared/infrastructure/http/cors-middleware.js';
 import { CheckConsentForPurpose } from '../../src/modules/consent/application/internal/query-services/check-consent-for-purpose.js';
 import { DrizzleConsentRepository } from '../../src/modules/consent/infrastructure/persistence/drizzle-consent-repository.js';
 import { ConsentConversationProcessingAuthorizer } from '../../src/modules/conversations/infrastructure/persistence/consent-conversation-processing-authorizer.js';
@@ -33,7 +34,9 @@ let server: ReturnType<ReturnType<typeof express>['listen']> | undefined;
 const accountIds = new Set<string>();
 const emails = new Set<string>();
 let gateFirstStream = false;
+let failNextStream = false;
 let providerCalls = 0;
+const frontendOrigin = 'http://frontend.synthetic.test';
 let firstDeltaReady = deferred();
 let releaseFirstDelta = deferred();
 
@@ -64,6 +67,7 @@ beforeAll(async () => {
     generateText: async () => { providerCalls += 1; return { text: 'REST answer' }; },
     async *streamText() {
       providerCalls += 1;
+      if (failNextStream) { failNextStream = false; throw new Error('synthetic provider failure'); }
       yield { type: 'delta', text: 'SSE ' };
       if (gateFirstStream) { firstDeltaReady.resolve(); await releaseFirstDelta.promise; }
       yield { type: 'delta', text: 'answer' };
@@ -79,6 +83,7 @@ beforeAll(async () => {
   );
   const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
   const app = express();
+  app.use(createCorsMiddleware([frontendOrigin]));
   app.use(express.json());
   app.post('/api/v1/conversations/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.sendConversationMessage(req, res).catch(next); });
   app.post('/api/v1/conversations/:id/messages/stream', authenticationMiddleware(jwt), (req, res, next) => { void controller.streamConversationMessage(req, res).catch(next); });
@@ -89,6 +94,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   gateFirstStream = false;
+  failNextStream = false;
   providerCalls = 0;
   releaseFirstDelta.resolve();
   if (!db) return;
@@ -104,6 +110,35 @@ afterAll(async () => {
 });
 
 describe('Conversation SSE PostgreSQL integration', () => {
+  it('answers CORS preflight for an allowed origin and denies an unlisted origin', async () => {
+    const address = server?.address() as AddressInfo;
+    const url = `http://127.0.0.1:${address.port}/api/v1/conversations/synthetic/messages/stream`;
+    const allowed = await fetch(url, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: frontendOrigin,
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization, content-type',
+      },
+    });
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
+    expect(allowed.headers.get('vary')).toContain('Origin');
+    expect(allowed.headers.get('access-control-allow-headers')).toBe('Authorization, Content-Type');
+    expect(allowed.headers.get('access-control-allow-credentials')).toBeNull();
+
+    const denied = await fetch(url, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://unlisted.synthetic.test',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization, content-type',
+      },
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
   it('streams incrementally over HTTP and persists one user and one completed assistant message', async () => {
     const owner = await createOwner();
     gateFirstStream = true;
@@ -113,9 +148,11 @@ describe('Conversation SSE PostgreSQL integration', () => {
     const token = await jwt.issue(owner.id);
     const address = server?.address() as AddressInfo;
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages/stream`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'A private student message' }),
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'A private student message' }),
     });
     expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
+    expect(response.headers.get('vary')).toContain('Origin');
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     const reader = response.body?.getReader();
     if (!reader) throw new Error('SSE response body is unavailable');
@@ -141,10 +178,61 @@ describe('Conversation SSE PostgreSQL integration', () => {
     expect(body).toContain('event: message.started');
     expect(body).toContain('event: message.completed');
     expect(body).toContain('event: stream.completed');
+    expect(body.indexOf('event: message.started')).toBeLessThan(body.indexOf('event: message.delta'));
+    expect(body.indexOf('event: message.completed')).toBeLessThan(body.indexOf('event: stream.completed'));
     const rows = await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId));
     expect(rows.map(row => [row.role, row.status, row.content])).toEqual([
       ['user', 'completed', 'A private student message'], ['assistant', 'completed', 'SSE answer'],
     ]);
+  });
+
+  it('keeps JWT mandatory on an allowed CORS origin', async () => {
+    const owner = await createOwner();
+    const address = server?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages/stream`, {
+      method: 'POST', headers: { Origin: frontendOrigin, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'synthetic unauthorized request' }),
+    });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
+    expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId))).toHaveLength(0);
+    expect(providerCalls).toBe(0);
+  });
+
+  it('accepts an authenticated REST message from an allowed CORS origin', async () => {
+    const owner = await createOwner();
+    const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
+    const token = await jwt.issue(owner.id);
+    const address = server?.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages`, {
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'synthetic authorized REST message' }),
+    });
+    expect(response.status).toBe(201);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
+    expect(await response.json()).toMatchObject({
+      userMessage: { content: 'synthetic authorized REST message', role: 'user' },
+      assistantMessage: { content: 'REST answer', role: 'assistant' },
+    });
+    expect(providerCalls).toBe(1);
+  });
+
+  it('formats stream.error over an allowed-origin SSE response without exposing provider details', async () => {
+    const owner = await createOwner();
+    const jwt = new JwtAccessTokenService('integration-only-secret-with-at-least-32-characters', 'integration-test', 'integration-test-client', 300);
+    const token = await jwt.issue(owner.id);
+    const address = server?.address() as AddressInfo;
+    failNextStream = true;
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages/stream`, {
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'synthetic provider failure case' }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
+    const body = await response.text();
+    expect(body).toContain('event: message.started\ndata: {"messageId":');
+    expect(body).toContain('event: stream.error\ndata: {"code":"generation_failed"}');
+    expect(body.indexOf('event: message.started')).toBeLessThan(body.indexOf('event: stream.error'));
+    expect(body).not.toContain('synthetic provider failure');
+    expect(body).not.toContain('stream.completed');
   });
 
   it('holds the shared PostgreSQL advisory lock across stream generation and releases it after a failure', async () => {
@@ -184,9 +272,10 @@ describe('Conversation SSE PostgreSQL integration', () => {
     const token = await jwt.issue(ownerB.id);
     const address = server?.address() as AddressInfo;
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${ownerA.conversationId}/messages/stream`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
     });
     expect(response.status).toBe(404);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
     expect(await response.json()).toEqual({ error: 'Conversation not found' });
     expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, ownerA.conversationId))).toHaveLength(0);
   });
@@ -197,9 +286,10 @@ describe('Conversation SSE PostgreSQL integration', () => {
     const token = await jwt.issue(owner.id);
     const address = server?.address() as AddressInfo;
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
     });
     expect(response.status).toBe(403);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
     expect(await response.json()).toEqual({ error: 'Current ai_conversation_processing consent is required' });
     expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId))).toHaveLength(0);
     expect(providerCalls).toBe(0);
@@ -212,9 +302,10 @@ describe('Conversation SSE PostgreSQL integration', () => {
     const token = await jwt.issue(owner.id);
     const address = server?.address() as AddressInfo;
     const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/conversations/${owner.conversationId}/messages/stream`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
+      method: 'POST', headers: { Origin: frontendOrigin, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'must not be stored' }),
     });
     expect(response.status).toBe(403);
+    expect(response.headers.get('access-control-allow-origin')).toBe(frontendOrigin);
     expect(response.headers.get('content-type')).not.toContain('text/event-stream');
     expect(await response.json()).toEqual({ error: 'Current ai_conversation_processing consent is required' });
     expect(await db.select().from(conversationMessages).where(eq(conversationMessages.conversationId, owner.conversationId))).toHaveLength(0);

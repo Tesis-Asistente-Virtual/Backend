@@ -1,4 +1,5 @@
 import type { MonitoringEnrollment, MonitoringSession } from '../../../domain/model/monitoring-contracts.js';
+import type { MonitoringConversationAssociation } from '../../../domain/model/monitoring-conversation-association.js';
 
 export function toMonitoringEnrollmentResource(value: MonitoringEnrollment) {
   return {
@@ -22,6 +23,17 @@ export function toMonitoringSessionResource(value: MonitoringSession) {
     updatedAt: value.updatedAt.toISOString(),
     closedAt: value.closedAt?.toISOString() ?? null,
     revision: value.revision,
+  };
+}
+
+export function toMonitoringConversationAssociationResource(value: MonitoringConversationAssociation) {
+  return {
+    id: value.associationId,
+    contractVersion: value.contractVersion,
+    enrollmentId: value.enrollmentId,
+    monitoringSessionId: value.monitoringSessionId,
+    conversationId: value.conversationId,
+    createdAt: value.createdAt.toISOString(),
   };
 }
 

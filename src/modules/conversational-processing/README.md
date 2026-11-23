@@ -35,3 +35,9 @@ Ambos endpoints no guardan mensajes ni resultados y no alteran la conversación.
 ## Límites
 
 La salida no es evaluación psicométrica, puntuación DASS, nivel de severidad, diagnóstico ni evaluación de seguridad. No existe integración con Safety. La aprobación de finalidades, avisos, proveedor, retención y uso con estudiantes requiere revisión profesional, jurídica y ética independiente.
+
+## Demostración automatizada
+
+`npm run demo:conversational` ejecuta el harness HTTP + PostgreSQL aislado descrito en [`docs/sprint-4c4-demo-environment.md`](../../../docs/sprint-4c4-demo-environment.md). Requiere `DEMO_DATABASE_URL` que las guardas verifiquen como loopback y base exacta `tesis_demo_db`; no usa `DATABASE_URL` ni `TEST_DATABASE_URL` como alternativa. La suite crea una cuenta sintética, registra decisiones para los avisos de demostración, crea conversación y mensajes, y solicita explícitamente extracción y resultado. El generador del chat y el extractor son fakes deterministas: no se llama a OpenAI.
+
+El test verifica además `preliminaryGuidance`: origen `reported`, IDs de mensajes fuente, brechas, preguntas opcionales, orientación/limitaciones fijas y ausencia de diagnóstico, puntuaciones o cuenta propietaria en la respuesta. Compara mensajes y eventos de consentimiento antes y después del análisis para verificar que la extracción y el resultado no añadan escrituras. El resultado sigue siendo efímero; monitoreo longitudinal, asociaciones de sesión/conversación y Safety no forman parte de esta demo. Los avisos son fixtures no jurídicos y no autorizan demostraciones con estudiantes.

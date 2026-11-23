@@ -33,8 +33,8 @@ function isAbortError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 }
 
-function safeError(kind: ConversationSignalExtractionFailureKind): ConversationSignalExtractionError {
-  return new ConversationSignalExtractionError(kind);
+function safeError(kind: ConversationSignalExtractionFailureKind, incompleteReason?: 'max_output_tokens' | 'other'): ConversationSignalExtractionError {
+  return new ConversationSignalExtractionError(kind, incompleteReason);
 }
 
 function mapProviderError(error: unknown): ConversationSignalExtractionError {
@@ -109,7 +109,11 @@ export class OpenAiConversationSignalExtractor implements ConversationSignalExtr
 
     if (!isRecord(response)) throw safeError('invalid_response');
     if (containsRefusal(response.output)) throw safeError('refusal');
-    if (response.status === 'incomplete') throw safeError('incomplete_response');
+    if (response.status === 'incomplete') {
+      const reason = isRecord(response.incomplete_details) && response.incomplete_details.reason === 'max_output_tokens'
+        ? 'max_output_tokens' : 'other';
+      throw safeError('incomplete_response', reason);
+    }
     if (response.status === 'failed') throw safeError('provider_unavailable');
     if (signal?.aborted) throw safeError('cancelled');
     if (response.status !== 'completed' || !Object.hasOwn(response, 'error') || response.error !== null) {

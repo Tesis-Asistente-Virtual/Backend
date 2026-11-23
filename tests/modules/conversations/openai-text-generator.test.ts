@@ -79,13 +79,37 @@ describe('OpenAiTextGenerator', () => {
     expect(create.mock.calls[0]?.[0].max_output_tokens).toBe(400);
   });
 
-  it('rejects empty text and incomplete provider responses', async () => {
+  it('distinguishes empty output, token-limited incomplete output, and provider failure', async () => {
     const empty = harness(sdkResponse({ output_text: ' \n ' }));
-    await expect(empty.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response' });
-    const incomplete = harness(sdkResponse({ status: 'incomplete' }));
-    await expect(incomplete.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response' });
+    await expect(empty.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'empty_response', failureStage: 'final_text_validation' });
+    const incomplete = harness(sdkResponse({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } as OpenAI.Responses.Response['incomplete_details'] }));
+    await expect(incomplete.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'incomplete_response', incompleteReason: 'max_output_tokens', failureStage: 'final_text_validation' });
     const failed = harness(sdkResponse({ status: 'failed' }));
-    await expect(failed.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response' });
+    await expect(failed.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'provider', failureStage: 'final_text_validation' });
+  });
+
+  it('treats unknown nonterminal states and completed responses carrying errors as invalid', async () => {
+    const queued = harness(sdkResponse({ status: 'queued' as OpenAI.Responses.Response['status'] }));
+    await expect(queued.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response', failureStage: 'final_text_validation' });
+    const completedWithError = harness(sdkResponse({ error: { code: 'opaque', message: 'private' } as OpenAI.Responses.Response['error'] }));
+    await expect(completedWithError.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response' });
+  });
+
+  it('classifies malformed non-streaming text and usage as safe invalid responses', async () => {
+    const missingText = sdkResponse() as unknown as Record<string, unknown>;
+    delete missingText.output_text;
+    const absent = harness(missingText as unknown as OpenAI.Responses.Response);
+    await expect(absent.generator.generateText(generationRequest)).rejects.toMatchObject({
+      name: 'OpenAiTextGenerationError', kind: 'invalid_response', failureStage: 'final_text_validation',
+    });
+
+    const wrongText = harness(sdkResponse({ output_text: 42 as unknown as string }));
+    await expect(wrongText.generator.generateText(generationRequest)).rejects.toMatchObject({ kind: 'invalid_response' });
+
+    const wrongUsage = harness(sdkResponse({ usage: { input_tokens: -1 } as unknown as OpenAI.Responses.Response['usage'] }));
+    await expect(wrongUsage.generator.generateText(generationRequest)).rejects.toMatchObject({
+      name: 'OpenAiTextGenerationError', kind: 'invalid_response', failureStage: 'usage_extraction',
+    });
   });
 
   it('classifies provider authentication, rate limit, timeout, connection and unexpected failures safely', async () => {

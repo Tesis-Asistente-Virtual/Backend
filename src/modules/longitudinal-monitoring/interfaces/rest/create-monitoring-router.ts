@@ -7,6 +7,7 @@ import { DrizzleConsentRepository } from '../../../consent/infrastructure/persis
 import { ConsentMonitoringAuthorizer } from '../../infrastructure/persistence/consent-monitoring-authorizer.js';
 import { DrizzleMonitoringEnrollmentRepository } from '../../infrastructure/persistence/drizzle-monitoring-enrollment-repository.js';
 import { DrizzleMonitoringSessionRepository } from '../../infrastructure/persistence/drizzle-monitoring-session-repository.js';
+import { DrizzleMonitoringConversationAssociationRepository } from '../../infrastructure/persistence/drizzle-monitoring-conversation-association-repository.js';
 import { GetMonitoringInfo } from '../../application/internal/query-services/get-monitoring-info.js';
 import { ListMyMonitoringEnrollments } from '../../application/internal/query-services/list-my-monitoring-enrollments.js';
 import { GetMyMonitoringEnrollment } from '../../application/internal/query-services/get-my-monitoring-enrollment.js';
@@ -14,6 +15,9 @@ import { ListMyMonitoringSessions } from '../../application/internal/query-servi
 import { StartMonitoringEnrollment } from '../../application/internal/command-services/start-monitoring-enrollment.js';
 import { ChangeMonitoringEnrollmentState, PauseMonitoringEnrollment, ResumeMonitoringEnrollment, WithdrawMonitoringEnrollment, CompleteMonitoringEnrollment } from '../../application/internal/command-services/change-monitoring-enrollment-state.js';
 import { CreateMonitoringSession } from '../../application/internal/command-services/create-monitoring-session.js';
+import { AssociateConversationWithMonitoringSession } from '../../application/internal/command-services/associate-conversation-with-monitoring-session.js';
+import type { MonitoringConversationAssociationScope } from '../../application/ports/monitoring-conversation-association-scope.js';
+import { DenyUnapprovedMonitoringConversationAssociation } from '../../infrastructure/persistence/deny-unapproved-monitoring-conversation-association.js';
 import { MonitoringController } from './resources/monitoring-controller.js';
 
 const routes = [
@@ -27,9 +31,14 @@ const routes = [
   ['post', '/enrollments/:id/complete'],
   ['post', '/enrollments/:id/sessions'],
   ['get', '/enrollments/:id/sessions'],
+  ['post', '/enrollments/:id/sessions/:sessionId/conversation'],
 ] as const;
 
-export function createMonitoringRouter(database: NodePgDatabase<typeof schema> | null, jwt: JwtAccessTokenService | null) {
+export function createMonitoringRouter(
+  database: NodePgDatabase<typeof schema> | null,
+  jwt: JwtAccessTokenService | null,
+  associationScope: MonitoringConversationAssociationScope = new DenyUnapprovedMonitoringConversationAssociation(),
+) {
   const router = Router();
   if (!database || !jwt) {
     for (const [method, path] of routes) router[method](path, (_req, _res, next) => next(new Error('Monitoring dependencies are not configured')));
@@ -38,6 +47,7 @@ export function createMonitoringRouter(database: NodePgDatabase<typeof schema> |
 
   const enrollments = new DrizzleMonitoringEnrollmentRepository(database);
   const sessions = new DrizzleMonitoringSessionRepository(database);
+  const associations = new DrizzleMonitoringConversationAssociationRepository(database);
   const consent = new ConsentMonitoringAuthorizer(new DrizzleConsentRepository(database));
   const enrollmentState = new ChangeMonitoringEnrollmentState(enrollments, consent);
   const controller = new MonitoringController(
@@ -51,6 +61,7 @@ export function createMonitoringRouter(database: NodePgDatabase<typeof schema> |
     new CompleteMonitoringEnrollment(enrollmentState),
     new CreateMonitoringSession(enrollments, sessions, consent),
     new ListMyMonitoringSessions(enrollments, sessions),
+    new AssociateConversationWithMonitoringSession(enrollments, associations, consent, associationScope),
   );
   const auth = authenticationMiddleware(jwt);
   router.get('/info', auth, (req, res, next) => { void controller.monitoringInfo(req, res).catch(next); });
@@ -62,6 +73,7 @@ export function createMonitoringRouter(database: NodePgDatabase<typeof schema> |
   router.post('/enrollments/:id/complete', auth, (req, res, next) => { void controller.complete(req, res).catch(next); });
   router.post('/enrollments/:id/sessions', auth, (req, res, next) => { void controller.createSessionForEnrollment(req, res).catch(next); });
   router.get('/enrollments/:id/sessions', auth, (req, res, next) => { void controller.listSessionsForEnrollment(req, res).catch(next); });
+  router.post('/enrollments/:id/sessions/:sessionId/conversation', auth, (req, res, next) => { void controller.associateConversationWithSession(req, res).catch(next); });
   router.get('/enrollments/:id', auth, (req, res, next) => { void controller.getEnrollment(req, res).catch(next); });
   return router;
 }

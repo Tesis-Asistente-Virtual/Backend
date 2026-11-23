@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, pgTable, timestamp, uuid, varchar, text } from 'drizzle-orm/pg-core';
+import { check, index, pgTable, timestamp, uuid, varchar, text, unique } from 'drizzle-orm/pg-core';
 import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
 
 export const conversations = pgTable('conversations', {
@@ -11,6 +11,7 @@ export const conversations = pgTable('conversations', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   check('conversations_status_check', sql`${table.status} in ('active', 'archived')`),
+  unique('conversations_id_account_uq').on(table.id, table.accountId),
   index('conversations_account_created_idx').on(table.accountId, table.createdAt.desc()),
 ]);
 

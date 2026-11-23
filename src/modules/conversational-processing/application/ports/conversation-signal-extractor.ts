@@ -23,9 +23,11 @@ export type ConversationSignalExtractionFailureKind =
   | 'incomplete_response'
   | 'cancelled';
 
+export type ConversationSignalExtractionIncompleteReason = 'max_output_tokens' | 'other';
+
 /** Provider-neutral and safe for application handling; never carries prompts or provider payloads. */
 export class ConversationSignalExtractionError extends Error {
-  constructor(readonly kind: ConversationSignalExtractionFailureKind) {
+  constructor(readonly kind: ConversationSignalExtractionFailureKind, readonly incompleteReason?: ConversationSignalExtractionIncompleteReason) {
     super('Conversation signal extraction failed');
     this.name = 'ConversationSignalExtractionError';
   }

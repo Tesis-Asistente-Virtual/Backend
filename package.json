@@ -14,6 +14,7 @@
     "demo:seed-consent": "tsx scripts/seed-demo-consent-notices.ts",
     "demo:server": "tsx scripts/start-demo-server.ts",
     "demo:conversational": "tsx scripts/run-demo-conversational.ts",
+    "ai:check:synthetic": "tsx scripts/run-synthetic-openai-check.ts",
     "manual:test-signal-extraction": "tsx scripts/manual-test-signal-extraction.ts",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",

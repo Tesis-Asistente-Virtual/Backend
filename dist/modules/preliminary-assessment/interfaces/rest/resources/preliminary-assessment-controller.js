@@ -5,22 +5,26 @@ export class PreliminaryAssessmentController {
     start;
     list;
     get;
+    getForm;
     submitResponse;
     pauseAssessment;
     resumeAssessment;
     withdrawAssessment;
     completeAssessment;
+    reauthorizeAssessment;
     getResult;
-    constructor(info, start, list, get, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, getResult) {
+    constructor(info, start, list, get, getForm, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, reauthorizeAssessment, getResult) {
         this.info = info;
         this.start = start;
         this.list = list;
         this.get = get;
+        this.getForm = getForm;
         this.submitResponse = submitResponse;
         this.pauseAssessment = pauseAssessment;
         this.resumeAssessment = resumeAssessment;
         this.withdrawAssessment = withdrawAssessment;
         this.completeAssessment = completeAssessment;
+        this.reauthorizeAssessment = reauthorizeAssessment;
         this.getResult = getResult;
     }
     async assessmentInfo(_req, res) {
@@ -59,6 +63,22 @@ export class PreliminaryAssessmentController {
         const { id } = assessmentIdParamsSchema.parse(req.params);
         res.status(200).json(toAssessmentResource(await this.get.execute(id, accountId)));
     }
+    async getAssessmentForm(req, res) {
+        const accountId = req.auth?.accountId;
+        if (!accountId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { id } = assessmentIdParamsSchema.parse(req.params);
+        const form = await this.getForm.execute(id, accountId);
+        res.status(200).json({
+            assessment: toAssessmentResource(form.assessment),
+            instrument: {
+                ...form.instrument,
+                effectiveAt: form.instrument.effectiveAt.toISOString(),
+            },
+        });
+    }
     async submit(req, res) {
         const accountId = req.auth?.accountId;
         if (!accountId) {
@@ -85,6 +105,16 @@ export class PreliminaryAssessmentController {
     pause(req, res) { return this.changeState(req, res, 'pause'); }
     resume(req, res) { return this.changeState(req, res, 'resume'); }
     withdraw(req, res) { return this.changeState(req, res, 'withdraw'); }
+    async reauthorize(req, res) {
+        const accountId = req.auth?.accountId;
+        if (!accountId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { id } = assessmentIdParamsSchema.parse(req.params);
+        emptyAssessmentBodySchema.parse(req.body ?? {});
+        res.status(200).json(toAssessmentResource(await this.reauthorizeAssessment.execute(id, accountId)));
+    }
     async complete(req, res) {
         const accountId = req.auth?.accountId;
         if (!accountId) {

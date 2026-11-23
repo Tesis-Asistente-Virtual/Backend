@@ -8,10 +8,10 @@ import { generateConversationSignalResultResponseSchema } from '../src/modules/c
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all forty operations', () => {
+  it('generates OpenAPI 3.0 documentation for all forty-one operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(40);
+    expect(operations).toHaveLength(41);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -40,6 +40,7 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/info');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions/{sessionId}/conversation');
     expect(openApiDocument.paths).toHaveProperty('/health');
     expect(openApiDocument.components.schemas).toHaveProperty('SignUpRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('UpdateMyProfileRequest');
@@ -84,6 +85,16 @@ describe('OpenAPI document', () => {
     expect(example.preliminaryGuidance).toHaveProperty('limitations');
     expect(example).not.toHaveProperty('accountId');
     expect(example).not.toHaveProperty('dass21Scores');
+  });
+  it('documents every SSE stream.error code currently emitted by the controller', () => {
+    const response = openApiDocument.paths['/api/v1/conversations/{id}/messages/stream'].post.responses['200'];
+    const examples = response.content['text/event-stream'].examples;
+    expect(examples).toHaveProperty('error');
+    expect(examples).toHaveProperty('persistenceFailed');
+    expect(examples).toHaveProperty('consentRequired');
+    expect(examples).toHaveProperty('consentUnavailable');
+    expect(examples).toHaveProperty('internalError');
+    expect(Object.values(examples).filter(example => example.value.includes('event: stream.error'))).toHaveLength(5);
   });
   it('marks every preliminary assessment operation as Bearer protected', () => {
     for (const [path, item] of Object.entries(openApiDocument.paths).filter(([path]) => path.startsWith('/api/v1/preliminary-assessments'))) {

@@ -6,8 +6,9 @@ import type { ListMyMonitoringSessions } from '../../../application/internal/que
 import type { StartMonitoringEnrollment } from '../../../application/internal/command-services/start-monitoring-enrollment.js';
 import type { PauseMonitoringEnrollment, ResumeMonitoringEnrollment, WithdrawMonitoringEnrollment, CompleteMonitoringEnrollment } from '../../../application/internal/command-services/change-monitoring-enrollment-state.js';
 import type { CreateMonitoringSession } from '../../../application/internal/command-services/create-monitoring-session.js';
-import { emptyMonitoringBodySchema, monitoringEnrollmentIdParamsSchema, monitoringPaginationSchema, startMonitoringEnrollmentBodySchema } from '../validation/monitoring-request-schemas.js';
-import { toMonitoringEnrollmentResource, toMonitoringPageResource, toMonitoringSessionResource } from '../transformers/monitoring-transformer.js';
+import type { AssociateConversationWithMonitoringSession } from '../../../application/internal/command-services/associate-conversation-with-monitoring-session.js';
+import { associateMonitoringConversationBodySchema, emptyMonitoringBodySchema, monitoringEnrollmentIdParamsSchema, monitoringPaginationSchema, monitoringSessionConversationParamsSchema, startMonitoringEnrollmentBodySchema } from '../validation/monitoring-request-schemas.js';
+import { toMonitoringConversationAssociationResource, toMonitoringEnrollmentResource, toMonitoringPageResource, toMonitoringSessionResource } from '../transformers/monitoring-transformer.js';
 
 export class MonitoringController {
   constructor(
@@ -21,6 +22,7 @@ export class MonitoringController {
     private readonly completeEnrollment: CompleteMonitoringEnrollment,
     private readonly createSession: CreateMonitoringSession,
     private readonly listSessions: ListMyMonitoringSessions,
+    private readonly associateConversation: AssociateConversationWithMonitoringSession,
   ) {}
 
   async monitoringInfo(_req: Request, res: Response): Promise<void> {
@@ -72,6 +74,19 @@ export class MonitoringController {
     const { id } = monitoringEnrollmentIdParamsSchema.parse(req.params);
     emptyMonitoringBodySchema.parse(req.body ?? {});
     res.status(201).json(toMonitoringSessionResource(await this.createSession.execute(id, accountId)));
+  }
+
+  async associateConversationWithSession(req: Request, res: Response): Promise<void> {
+    const accountId = req.auth?.accountId;
+    if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { id: enrollmentId, sessionId } = monitoringSessionConversationParamsSchema.parse(req.params);
+    const input = associateMonitoringConversationBodySchema.parse(req.body);
+    const association = await this.associateConversation.execute(accountId, {
+      enrollmentId,
+      monitoringSessionId: sessionId,
+      ...input,
+    });
+    res.status(201).json(toMonitoringConversationAssociationResource(association));
   }
 
   async listSessionsForEnrollment(req: Request, res: Response): Promise<void> {

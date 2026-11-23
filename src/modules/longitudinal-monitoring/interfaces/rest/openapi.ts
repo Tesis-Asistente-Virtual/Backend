@@ -5,6 +5,7 @@ const toSchema = (value: z.ZodType) => z.toJSONSchema(value, { target: 'openapi-
 const security = [{ bearerAuth: [] }];
 const error = { $ref: '#/components/schemas/ErrorResponse' };
 const idParam = { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+const sessionIdParam = { name: 'sessionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
 const pagination = [
   { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 99, default: 20 } },
   { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, maximum: 1_000_000, default: 0 } },
@@ -38,6 +39,11 @@ export const monitoringSchemas = {
   StartMonitoringEnrollmentRequest: toSchema(startMonitoringEnrollmentBodySchema),
   MonitoringEnrollment: toSchema(enrollment),
   MonitoringSession: toSchema(session),
+  AssociateMonitoringConversationRequest: toSchema(z.object({ conversationId: z.string().uuid(), explicitAssociation: z.literal(true) }).strict()),
+  MonitoringConversationAssociation: toSchema(z.object({
+    id: z.string().uuid(), contractVersion: z.literal('1.0'), enrollmentId: z.string().uuid(),
+    monitoringSessionId: z.string().uuid(), conversationId: z.string().uuid(), createdAt: z.string().datetime(),
+  }).strict()),
   MonitoringEnrollmentPage: page(enrollment),
   MonitoringSessionPage: page(session),
   MonitoringInfo: {
@@ -81,5 +87,19 @@ export const monitoringPaths = {
   '/api/v1/monitoring/enrollments/{id}/sessions': {
     post: { tags: ['Longitudinal Monitoring'], summary: 'Abrir una sesión explícita de monitoreo', description: 'Requiere inscripción activa y consentimiento vigente. No crea preguntas ni mediciones.', security, parameters: [idParam], responses: { '201': response('Sesión abierta', '#/components/schemas/MonitoringSession'), ...standardErrors } },
     get: { tags: ['Longitudinal Monitoring'], summary: 'Listar sesiones propias de una inscripción', security, parameters: [idParam, ...pagination], responses: { '200': response('Sesiones paginadas', '#/components/schemas/MonitoringSessionPage'), ...errors(['400', '401', '404', '500']) } },
+  },
+  '/api/v1/monitoring/enrollments/{id}/sessions/{sessionId}/conversation': {
+    post: {
+      tags: ['Longitudinal Monitoring'],
+      summary: 'Asociar explícitamente una conversación propia a una sesión de monitoreo',
+      description: 'Requiere JWT, consentimiento vigente longitudinal_monitoring y una versión de aviso aprobada expresamente para este enlace. El registro de producción deniega por defecto la asociación hasta registrar esa aprobación; los avisos sintéticos de pruebas no habilitan el flujo para participantes. Acepta solo inscripción activa, sesión en curso y conversación activa del mismo propietario. Persiste identificadores y fecha de asociación; no lee, copia ni devuelve mensajes, no extrae observaciones y no inicia procesamiento automático. Este enlace de metadatos no autoriza la reutilización posterior del contenido conversacional, que requeriría sus finalidades vigentes y alcance revisado.',
+      security,
+      parameters: [idParam, sessionIdParam],
+      requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AssociateMonitoringConversationRequest' }, example: { conversationId: '550e8400-e29b-41d4-a716-446655440001', explicitAssociation: true } } } },
+      responses: {
+        '201': response('Vínculo de metadatos creado; no incluye contenido de mensajes', '#/components/schemas/MonitoringConversationAssociation'),
+        ...errors(['400', '401', '403', '404', '409', '500', '503']),
+      },
+    },
   },
 } as const;

@@ -3,20 +3,33 @@ import { PreliminaryAssessmentError } from './assessment-errors.js';
 const optionSchema = z.object({
     id: z.string().trim().min(1).max(80),
     label: z.string().trim().min(1).max(300),
+    /** Server-owned value for deterministic instrument scoring; never accepted in answer bodies. */
+    scoringValue: z.number().int().min(0).max(3).optional(),
+}).strict();
+const publicOptionSchema = z.object({
+    id: z.string().trim().min(1).max(80),
+    label: z.string().trim().min(1).max(300),
 }).strict();
 const questionBase = {
     id: z.string().uuid(),
     prompt: z.string().trim().min(1).max(1000),
     required: z.boolean(),
+    /** Stable position within this immutable instrument version. Legacy rows may omit it and are unavailable for presentation. */
+    displayOrder: z.number().int().min(1).max(200).optional(),
 };
-export const instrumentQuestionSchema = z.discriminatedUnion('responseType', [
-    z.object({ ...questionBase, responseType: z.literal('text'), maxLength: z.number().int().min(1).max(2000) }).strict(),
-    z.object({ ...questionBase, responseType: z.literal('single_choice'), options: z.array(optionSchema).min(1).max(50) }).strict(),
-    z.object({ ...questionBase, responseType: z.literal('multiple_choice'), options: z.array(optionSchema).min(1).max(50), maxSelections: z.number().int().min(1).max(50) }).strict(),
-    z.object({ ...questionBase, responseType: z.literal('number'), minimum: z.number().finite(), maximum: z.number().finite() }).strict()
-        .refine(question => question.minimum <= question.maximum, 'Question minimum must not exceed maximum'),
-    z.object({ ...questionBase, responseType: z.literal('boolean') }).strict(),
-]);
+function createInstrumentQuestionSchema(option) {
+    return z.discriminatedUnion('responseType', [
+        z.object({ ...questionBase, responseType: z.literal('text'), maxLength: z.number().int().min(1).max(2000) }).strict(),
+        z.object({ ...questionBase, responseType: z.literal('single_choice'), options: z.array(option).min(1).max(50) }).strict(),
+        z.object({ ...questionBase, responseType: z.literal('multiple_choice'), options: z.array(option).min(1).max(50), maxSelections: z.number().int().min(1).max(50) }).strict(),
+        z.object({ ...questionBase, responseType: z.literal('number'), minimum: z.number().finite(), maximum: z.number().finite() }).strict()
+            .refine(question => question.minimum <= question.maximum, 'Question minimum must not exceed maximum'),
+        z.object({ ...questionBase, responseType: z.literal('boolean') }).strict(),
+    ]);
+}
+export const instrumentQuestionSchema = createInstrumentQuestionSchema(optionSchema);
+/** REST projection schema excludes server-only per-option scoring metadata. */
+export const publicInstrumentQuestionSchema = createInstrumentQuestionSchema(publicOptionSchema);
 export const instrumentVersionSchema = z.object({
     instrumentId: z.string().uuid(),
     instrumentVersionId: z.string().uuid(),
@@ -38,6 +51,12 @@ export const instrumentVersionSchema = z.object({
     if (new Set(ids).size !== ids.length) {
         context.addIssue({ code: 'custom', path: ['questions'], message: 'Question identifiers must be unique within an instrument version' });
     }
+    const positions = instrument.questions.map(question => question.displayOrder);
+    const hasPositions = positions.some(position => position !== undefined);
+    if (hasPositions && (positions.some(position => position === undefined) || new Set(positions).size !== positions.length ||
+        Array.from({ length: positions.length }, (_, index) => index + 1).some(position => !positions.includes(position)))) {
+        context.addIssue({ code: 'custom', path: ['questions'], message: 'Question display positions must be unique and contiguous within an instrument version' });
+    }
     for (const question of instrument.questions) {
         if ('options' in question) {
             const optionIds = question.options.map(option => option.id);
@@ -58,6 +77,16 @@ export const instrumentVersionSchema = z.object({
         context.addIssue({ code: 'custom', path: ['approval'], message: 'An approved instrument needs approval and license metadata' });
     }
 });
+/** Projects an instrument question to its public form without internal scoring metadata. */
+export function toPublicInstrumentQuestion(question) {
+    if ('options' in question) {
+        return {
+            ...question,
+            options: question.options.map(({ id, label }) => ({ id, label })),
+        };
+    }
+    return question;
+}
 export function parseInstrumentVersion(value) {
     const parsed = instrumentVersionSchema.safeParse(value);
     if (!parsed.success)
@@ -65,7 +94,11 @@ export function parseInstrumentVersion(value) {
     return parsed.data;
 }
 export function isInstrumentAvailable(instrument) {
-    return instrument.status === 'approved' && instrument.approval.status === 'approved' &&
+    const positions = instrument.questions.map(question => question.displayOrder);
+    const ordered = positions.every(position => position !== undefined) &&
+        new Set(positions).size === positions.length &&
+        Array.from({ length: positions.length }, (_, index) => index + 1).every(position => positions.includes(position));
+    return ordered && instrument.status === 'approved' && instrument.approval.status === 'approved' &&
         instrument.approval.approvedAt !== null && instrument.approval.approvalReference !== null &&
         (instrument.license.status === 'authorized' || instrument.license.status === 'not_applicable') &&
         instrument.questions.length > 0;

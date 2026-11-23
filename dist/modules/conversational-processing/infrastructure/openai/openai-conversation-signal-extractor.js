@@ -20,8 +20,8 @@ function containsRefusal(output) {
 function isAbortError(error) {
     return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError';
 }
-function safeError(kind) {
-    return new ConversationSignalExtractionError(kind);
+function safeError(kind, incompleteReason) {
+    return new ConversationSignalExtractionError(kind, incompleteReason);
 }
 function mapProviderError(error) {
     if (error instanceof ConversationSignalExtractionError)
@@ -97,8 +97,11 @@ export class OpenAiConversationSignalExtractor {
             throw safeError('invalid_response');
         if (containsRefusal(response.output))
             throw safeError('refusal');
-        if (response.status === 'incomplete')
-            throw safeError('incomplete_response');
+        if (response.status === 'incomplete') {
+            const reason = isRecord(response.incomplete_details) && response.incomplete_details.reason === 'max_output_tokens'
+                ? 'max_output_tokens' : 'other';
+            throw safeError('incomplete_response', reason);
+        }
         if (response.status === 'failed')
             throw safeError('provider_unavailable');
         if (signal?.aborted)

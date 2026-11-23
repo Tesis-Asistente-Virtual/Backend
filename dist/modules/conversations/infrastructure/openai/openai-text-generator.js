@@ -23,13 +23,6 @@ function generationLimits(configuration) {
         defaultOutputTokens: configuration.maxOutputTokens,
     };
 }
-function resultUsage(response) {
-    return response.usage ? {
-        inputTokens: response.usage.input_tokens,
-        outputTokens: response.usage.output_tokens,
-        totalTokens: response.usage.total_tokens,
-    } : undefined;
-}
 function isRecord(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -75,20 +68,25 @@ function validateOutputItems(value) {
     }
     return items;
 }
-function extractCompletedText(responseValue) {
+function extractCompletedText(responseValue, requireOutputText = false) {
     if (!isRecord(responseValue))
         throw invalidResponse('final_text_validation');
     const response = responseValue;
     if (typeof response.status !== 'string')
         throw invalidResponse('final_text_validation');
-    if (response.status !== 'completed') {
+    if (response.status === 'incomplete') {
         const reason = isRecord(response.incomplete_details) && response.incomplete_details.reason === 'max_output_tokens' ? 'max_output_tokens' : 'other';
         throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', reason, 'final_text_validation');
     }
+    if (response.status === 'failed') {
+        throw new OpenAiTextGenerationError('provider', 'Text generation provider failed the response', undefined, 'final_text_validation');
+    }
+    if (response.status !== 'completed')
+        throw invalidResponse('final_text_validation');
     if (!Object.hasOwn(response, 'error'))
         throw invalidResponse('final_text_validation');
     if (response.error !== null) {
-        throw new OpenAiTextGenerationError('incomplete_response', 'Text generation did not complete successfully', undefined, 'final_text_validation');
+        throw invalidResponse('final_text_validation');
     }
     const outputItems = validateOutputItems(response.output);
     let text;
@@ -96,6 +94,9 @@ function extractCompletedText(responseValue) {
         if (typeof response.output_text !== 'string')
             throw invalidResponse('final_text_validation');
         text = response.output_text;
+    }
+    else if (requireOutputText) {
+        throw invalidResponse('final_text_validation');
     }
     else {
         text = outputItems.flatMap(item => item.content)
@@ -203,13 +204,8 @@ export class OpenAiTextGenerator {
         catch (error) {
             throw mapProviderError(error);
         }
-        if (response.status !== 'completed' || response.error !== null) {
-            throw new OpenAiTextGenerationError('invalid_response', 'Text generation provider did not complete the response');
-        }
-        const text = response.output_text.trim();
-        if (!text)
-            throw new OpenAiTextGenerationError('invalid_response', 'Text generation provider returned empty text');
-        const usage = resultUsage(response);
+        const { text, response: validatedResponse } = extractCompletedText(response, true);
+        const usage = validateUsage(validatedResponse.usage);
         return { text, ...(usage ? { usage } : {}) };
     }
     async *streamText(request, signal) {

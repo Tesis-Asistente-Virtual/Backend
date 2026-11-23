@@ -6,7 +6,7 @@ Esta guía describe el flujo existente, sin agregar endpoints ni persistir resul
 
 Hay dos formas de demostrarlo:
 
-1. **Modo simulado automatizado:** sigue [`docs/sprint-4c3-isolated-demo.md`](sprint-4c3-isolated-demo.md): `npm run demo:seed-test-consent` agrega avisos explícitamente ficticios únicamente a `tesis_test_db`, y `npm run demo:conversational` inicia un servidor HTTP efímero, crea cuenta/JWT, registra consentimiento, conversa y consulta extracción/resultado con generadores simulados. No llama a OpenAI. Ambos comandos requieren `TEST_DATABASE_URL` validada como base local `tesis_test_db`; no usan `DATABASE_URL` como fallback.
+1. **Modo simulado automatizado:** sigue [`docs/sprint-4c4-demo-environment.md`](sprint-4c4-demo-environment.md): `npm run demo:conversational` verifica mediante `DEMO_DATABASE_URL` una base loopback exacta `tesis_demo_db`, luego ejecuta un harness HTTP efímero con PostgreSQL real, cuenta/JWT sintéticos, avisos y decisiones de consentimiento de esa base, conversación, extracción y resultado con proveedores simulados. No llama a OpenAI. El comando no usa `DATABASE_URL` ni `TEST_DATABASE_URL` como fallback. Las cuentas sintéticas generadas se limpian al terminar; los avisos demo permanecen inmutables.
 2. **Modo manual con proveedor configurado:** las llamadas HTTP a mensajes REST/SSE y a `/signals/extract` o `/signals/results` invocan los adaptadores configurados. Si OpenAI está habilitado, cada una puede realizar una solicitud real al proveedor. Los comandos siguientes son ejemplos para ejecución manual y no se ejecutaron como parte de esta tarea. No hay una ruta HTTP de mock ni un bypass de consentimiento.
 
 Los ejemplos usan una cuenta, correo y mensajes sintéticos. No pegues tokens en tickets, capturas, logs o repositorios. El backend persiste los mensajes de chat; **el resultado de señales no se persiste** y su ID no permite recuperarlo después.
@@ -19,9 +19,9 @@ Los ejemplos usan una cuenta, correo y mensajes sintéticos. No pegues tokens en
 - No se verificó el contenido de ninguna base en esta tarea. Los avisos disponibles se obtienen de `GET /api/v1/consents/notices`. Si la respuesta es `[]` o falta una de las dos finalidades, el flujo de extracción está bloqueado: no publiques ni inventes un aviso para la demo. En pruebas automatizadas pueden existir fixtures explícitamente no legales en la base de pruebas protegida; no los uses como avisos de una demostración real.
 - Para realizar el modo manual completo debe estar configurado el proveedor de generación. En ese modo, enviar un mensaje, extraer señales y generar el resultado son acciones explícitas que pueden invocar OpenAI. No se inicia ninguna de ellas al arrancar el servidor.
 
-**Validación de Sprint 4C.2 (2026-11-21):** el intento de lectura a `GET /health` en `localhost:3000` no encontró un servidor disponible; el GET no destructivo de `/api/v1/consents/notices` tampoco estuvo disponible. `TEST_DATABASE_URL` no está configurada. Por ello, el estado de los avisos es **desconocido en el ambiente**, no se concluye que estén ausentes. El flujo manual queda bloqueado hasta disponer de una instancia local aislada y verificar avisos efectivos para ambas finalidades.
+**Validación de Sprint 4C.2 (2026-11-21):** el intento de lectura a `GET /health` en `localhost:3000` no encontró un servidor disponible; el GET no destructivo de `/api/v1/consents/notices` tampoco estuvo disponible. Por ello, el estado de los avisos era **desconocido en ese ambiente**, no se concluyó que estuvieran ausentes. Para el harness simulado se usa la base dedicada `tesis_demo_db`; para HTTP manual, primero verifica una instancia local aislada y los avisos aplicables.
 
-Para ejecutar actualmente la variante automatizada aislada, usa las instrucciones 4C.3. Sus avisos marcados como “SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS” son fixtures no jurídicos y viven solo en la base de pruebas. El flujo manual descrito abajo sigue requiriendo una base de demo aislada, avisos reales aprobados y proveedor configurado; no uses los fixtures sintéticos para una demo con personas.
+Para ejecutar la variante automatizada aislada, sigue las instrucciones de Sprint 4C.4: verificar `DEMO_DATABASE_URL`, aplicar previamente las migraciones autorizadas y cargar fixtures solo en `tesis_demo_db`. Los avisos marcados como “SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS” no son avisos jurídicos ni base para una demostración con participantes. El flujo manual descrito abajo requiere una base de demo aislada, avisos formalmente aprobados y proveedor configurado.
 
 ## Flujo reproducible con PowerShell
 
@@ -141,7 +141,9 @@ $result = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api/v1/conversations/$Co
 $result | ConvertTo-Json -Depth 20
 ```
 
-El contrato de `/signals/extract` permanece `{ status, schemaVersion, observations, missingInformation, clarificationQuestions }`. El resultado de `/signals/results` tiene exactamente estos campos en su schema público: `{ status, id, conversationId, generatedAt, schemaVersion, extractorVersion, sourceMessageIds, observations, missingInformation, clarificationQuestions, summary }`. No incluye `accountId`.
+El contrato de `/signals/extract` permanece `{ status, schemaVersion, observations, missingInformation, clarificationQuestions }`. El resultado de `/signals/results` tiene exactamente estos campos en su schema público: `{ status, id, conversationId, generatedAt, schemaVersion, extractorVersion, sourceMessageIds, observations, missingInformation, clarificationQuestions, summary, preliminaryGuidance }`. No incluye `accountId`.
+
+`preliminaryGuidance` tiene `{ contractVersion, conversationId, sourceMessageIds, observations, informationGaps, suggestedFollowUpQuestions, generalGuidance, limitations }`. La prueba integrada automatizada comprueba que las observaciones de la guía provengan de observaciones `reported` y referencien únicamente los mensajes seleccionados; también verifica brechas, preguntas opcionales, textos fijos y ausencia de campos de diagnóstico o puntuaciones.
 
 Dentro de `summary`:
 
@@ -162,7 +164,7 @@ Una pantalla de conversación puede mostrar mensajes por rol y un botón **“An
 4. Muestra `summary.interpretationLimits` en contexto. Si `descriptiveStatus` es `no_observations`, muestra que no se encontraron observaciones en los mensajes seleccionados; no lo presentes como ausencia de síntomas o peligro.
 5. Maneja al menos: `401` sesión inválida; `403` consentimiento requerido/retirado; `404` conversación ajena o inexistente; `400` solicitud o referencias inválidas; `503` autorización o extractor no disponible. No muestres stack, payloads del proveedor ni texto de errores internos.
 
-El resumen debe estar ligado solo a la respuesta en memoria de la interfaz; al cerrar o recargar la vista no se puede recuperar del servidor.
+El resumen debe estar ligado solo a la respuesta en memoria de la interfaz; al cerrar o recargar la vista no se puede recuperar del servidor. La demo no guarda resultados ni crea snapshots longitudinales.
 
 ## Comprobaciones de autorización y límites
 
@@ -176,6 +178,8 @@ El resumen debe estar ligado solo a la respuesta en memoria de la interfaz; al c
 
 ## Pruebas disponibles
 
-`npm test` ejecuta pruebas unitarias con dobles, excluyendo `tests/integration/**`. La suite de integración HTTP+PostgreSQL usa el router y JWT, Drizzle y datos sintéticos en `tesis_test_db`, consentimiento real y extractor simulado; cubre propiedad, consentimientos ausentes/retirados, respuesta de resultado, ID efímero y compatibilidad de `/extract`. Solo debe ejecutarse cuando `TEST_DATABASE_URL` esté configurada y las guardas existentes confirmen explícitamente la base local `tesis_test_db`. No se usa `DATABASE_URL` como fallback. Las pruebas no llaman a OpenAI. El helper de integración puede crear avisos de fixture marcados explícitamente como texto no legal solo en la base de pruebas; nunca deben usarse como autorización para una demostración con personas.
+`npm test` ejecuta pruebas unitarias con dobles, excluyendo `tests/integration/**`. `npm run demo:conversational` ejecuta específicamente `tests/integration/conversational-demo.integration.test.ts`: usa la guarda `DEMO_DATABASE_URL` → `tesis_demo_db` local, PostgreSQL real, JWT y consentimiento reales de esa base, pero generador conversacional y extractor simulados. Comprueba registro/inicio de sesión, avisos demo, consentimiento, conversación y mensajes, `/signals/extract`, `/signals/results` y `preliminaryGuidance`, propiedad y bloqueo sin consentimiento. No llama a OpenAI. La suite general `npm run test:integration`, cuando se ejecuta separadamente, usa `TEST_DATABASE_URL` para `tesis_test_db`; no es la configuración de `demo:conversational`. Ningún comando usa `DATABASE_URL` como fallback.
+
+Los avisos de `tesis_demo_db` están marcados como solo demostración y no son aprobación legal ni consentimiento apto para participantes. La demo verifica infraestructura y contratos con datos sintéticos, no aprobación clínica/profesional ni aptitud para un piloto.
 
 La comprobación actual de avisos no pudo completarse porque el servidor local no estaba disponible. La disponibilidad de avisos en la instancia de demostración debe comprobarse con el endpoint público; no se siembran avisos ni consentimientos desde esta guía.

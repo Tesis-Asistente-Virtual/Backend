@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AssessmentResponse } from './assessment-response.js';
+import { assessmentResponseSchema, type AssessmentResponse } from './assessment-response.js';
 import type { InstrumentVersion } from './instrument.js';
 import type { PreliminaryAssessment } from './preliminary-assessment.js';
 import { PreliminaryAssessmentError } from './assessment-errors.js';
@@ -76,7 +76,10 @@ export function createDass21AssessmentScore(input: {
   }
   const mapping = validateDass21QuestionMapping(input.mapping, instrument);
   const responseByQuestion = new Map<string, AssessmentResponse>();
-  for (const response of assessment.responses as readonly AssessmentResponse[]) {
+  for (const responseValue of assessment.responses as readonly unknown[]) {
+    const parsedResponse = assessmentResponseSchema.safeParse(responseValue);
+    if (!parsedResponse.success) throw new Dass21ScoringError('invalid_answers');
+    const response = parsedResponse.data;
     if (response.assessmentId !== assessment.assessmentId || response.instrumentVersionId !== instrument.instrumentVersionId ||
         responseByQuestion.has(response.questionId)) throw new Dass21ScoringError('invalid_answers');
     responseByQuestion.set(response.questionId, response);
@@ -85,11 +88,25 @@ export function createDass21AssessmentScore(input: {
 
   const answers = mapping.entries.map(entry => {
     const response = responseByQuestion.get(entry.questionId);
-    if (!response || response.status !== 'answered' || response.answer?.type !== 'number' ||
-        !Number.isInteger(response.answer.value) || response.answer.value < 0 || response.answer.value > 3) {
+    const question = instrument.questions.find(candidate => candidate.id === entry.questionId);
+    const answer = response?.answer;
+    if (!response || response.status !== 'answered' || answer === null || answer === undefined || !question) {
       throw new Dass21ScoringError('incomplete_answers');
     }
-    return { instrumentVersionId: response.instrumentVersionId, itemNumber: entry.itemNumber, value: response.answer.value };
+
+    let value: number;
+    if (question.responseType === 'number' && answer.type === 'number') {
+      value = answer.value;
+    } else if (question.responseType === 'single_choice' && answer.type === 'single_choice') {
+      const selectedOption = question.options.find(option => option.id === answer.optionId);
+      if (selectedOption?.scoringValue === undefined) throw new Dass21ScoringError('invalid_answers');
+      value = selectedOption.scoringValue;
+    } else {
+      throw new Dass21ScoringError('invalid_answers');
+    }
+
+    if (!Number.isInteger(value) || value < 0 || value > 3) throw new Dass21ScoringError('invalid_answers');
+    return { instrumentVersionId: response.instrumentVersionId, itemNumber: entry.itemNumber, value };
   });
   const score = scoreDass21({
     instrument: {

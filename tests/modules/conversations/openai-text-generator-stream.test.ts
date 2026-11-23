@@ -161,7 +161,7 @@ describe('OpenAiTextGenerator streaming', () => {
     const terminalErrorStream = streamHarness(terminalError());
     const terminalErrorEvents: AiTextStreamEvent[] = [];
     const terminalErrorFailure = await consumeUntilError(terminalErrorStream.generator.streamText(request), terminalErrorEvents);
-    expect(terminalErrorFailure).toMatchObject({ kind: 'incomplete_response', failureStage: 'final_text_validation' });
+    expect(terminalErrorFailure).toMatchObject({ kind: 'invalid_response', failureStage: 'final_text_validation' });
     expect((terminalErrorFailure as Error).message).not.toContain('private provider detail');
     expect(terminalErrorEvents.some(event => event.type === 'completed')).toBe(false);
 

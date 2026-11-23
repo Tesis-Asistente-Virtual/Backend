@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 export const monitoringEnrollmentIdParamsSchema = z.object({ id: z.string().uuid() }).strict();
+export const monitoringSessionConversationParamsSchema = z.object({ id: z.string().uuid(), sessionId: z.string().uuid() }).strict();
 export const startMonitoringEnrollmentBodySchema = z.object({ explicitOptIn: z.literal(true) }).strict();
+export const associateMonitoringConversationBodySchema = z.object({
+  conversationId: z.string().uuid(),
+  explicitAssociation: z.literal(true),
+}).strict();
 export const emptyMonitoringBodySchema = z.object({}).strict();
 
 const queryInteger = z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().nonnegative());

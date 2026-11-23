@@ -135,3 +135,57 @@ Primero cerrar decisiones de fuente y retención con responsables humanos. Si se
 | Versión | Fecha | Cambio | Estado |
 | --- | --- | --- | --- |
 | 0.1 | 2026-11-22 | Inspección del modelo existente y propuesta conceptual de referencias, autorización y comparación sin activación. | Pendiente de revisión profesional, jurídica, ética y de producto. |
+| 0.2 | 2026-11-22 | Sprint 5D.2 implementa un enlace explícito de metadatos 1:1; producción deniega por defecto porque no hay aviso aprobado para ese alcance. No se reutiliza contenido ni se comparan sesiones. Véase README de LongitudinalMonitoring. | Integración técnica preparada; activación con participantes pendiente de aprobación del aviso y revisión profesional/jurídica/ética. |
+| 0.3 | 2026-11-22 | Sprint 5D.3A añade un comparador puro de dos snapshots efímeros. Solo acepta continuidad/cambio mediante vínculo temporal explícito y referencias concordantes; no accede a servicios ni persiste datos. | Contrato técnico unitario; no integrado ni autorizado para uso con participantes. |
+| 0.4 | 2026-11-22 | Sprint 5D.3B refuerza la procedencia: estados `reported`, periodo en cada referencia de salida, IDs de sesión/conversación en el vínculo temporal y rechazo de referencias cruzadas, duplicadas o estructuralmente incompatibles. | Garantías estructurales comprobables; no valida semántica ni autoriza integración. |
+
+## Sprint 5D.3A — comparador descriptivo puro
+
+### Estado y alcance
+
+Se implementó `compareLongitudinalConversationSnapshots` en `src/modules/longitudinal-monitoring/domain/model/longitudinal-conversation-comparison.ts`. Es una función determinista de dominio que recibe dos snapshots en memoria y devuelve un contrato estricto versión `1.1`. No conoce `accountId`, repositorios, Consent, PostgreSQL, Conversations, proveedores de IA ni endpoints. Su futuro llamador deberá verificar identidad/propiedad, sesión y enrollment, asociación autorizada y todos los consentimientos aplicables antes de construir o entregar snapshots.
+
+El snapshot contiene `sessionId`, `conversationId`, `observedAt`, `selectedMessageIds`, observaciones con `evidenceStatus: "reported"` (`observationIndex`, campo descriptivo, contexto opcional, texto efímero y `sourceMessageIds`) y `temporalContext` opcional. La afirmación temporal solo puede estar en el snapshot posterior y exige `explicitlyReported: true`; declara `change` o `continuity`, los IDs de sesión/conversación de ambos periodos, índices de observación y mensajes seleccionados del periodo posterior que expresan ese vínculo. El resultado conserva para cada evidencia `period`, `evidenceStatus`, `sessionId`, `conversationId`, `observationIndex` y `messageIds`; el vínculo temporal también conserva `explicitlyReported`, su periodo, IDs y referencia de observación. No devuelve el texto de observaciones.
+
+### Regla de resultado
+
+- `explicit_change_reported` o `explicit_continuity_reported` solo se devuelve cuando ambos periodos tienen observaciones reportadas con referencias seleccionadas, el tiempo es estrictamente creciente, la afirmación posterior apunta a la sesión anterior, ambas observaciones existen y coinciden en campo/contexto, y hay referencias seleccionadas para el vínculo temporal.
+- La procedencia se valida por periodo: cada mensaje fuente y mensaje de vínculo debe pertenecer a los mensajes seleccionados del snapshot que lo declara; las afirmaciones incluyen IDs exactos de sesión/conversación y referencias de observación. Evidencia `ambiguous`, no reportada o no evaluada no satisface el contrato.
+- En cualquier otra situación comparable, la salida es `insufficient_information` con una causa estructural (sin observaciones, un solo periodo con datos, vínculo ausente, evidencia que no coincide con ambos periodos, identidad cruzada, mensajes repetidos entre periodos o secuencia temporal no verificable). Referencias de mensaje ajenas al snapshot, índices duplicados, relaciones no soportadas y entradas mal formadas se rechazan por Zod.
+- El comparador jamás infiere relaciones de diferencias textuales, cantidad de mensajes/observaciones, silencio o ausencia. La afirmación `temporalContext` es una entrada estructurada y no una conclusión que este código valide semánticamente. En el estado actual, `preliminaryGuidance` no produce este vínculo entre sesiones; por tanto, ningún flujo actual puede invocar el comparador válidamente a partir de sus respuestas sin una fuente explícita adicional revisada.
+
+### Garantías y límites de Sprint 5D.3B
+
+**Garantías estructurales implementadas:** estado de evidencia estrictamente `reported`; unicidad de IDs e índices dentro de cada snapshot; pertenencia de mensajes a su snapshot; distinción y orden temporal de periodos; IDs de sesión y conversación concordantes con el enlace; referencias a observaciones existentes del mismo campo/contexto; tipo de relación limitado a `change` o `continuity`; y rechazo conservador de datos incompletos o cruzados. Ninguna de estas comprobaciones necesita leer el contenido de mensajes.
+
+**Garantías no ofrecidas:** no se prueba que el texto diga lo que afirma `temporalContext`; no se detectan contradicciones semánticas; igualdad/diferencia de cadenas no decide cambio o continuidad; no se determina mejoría, deterioro, frecuencia, intensidad, severidad ni significado psicológico. La marca `explicitlyReported: true` es una declaración estructural del llamador, no una prueba semántica. El vínculo de periodo se considera únicamente un input no confiable hasta que exista un productor revisado y autorizado.
+
+Casos rechazados o degradados a información insuficiente: evidencia no reportada y campos extra se rechazan por esquema; mensajes duplicados o ajenos al snapshot se rechazan por esquema; sesión/conversación cruzada, sesión repetida, conversación repetida, solapamiento de mensajes entre periodos, observación inexistente o de campo/contexto distinto y fechas no estrictamente ordenadas no producen comparación. La relación `improvement`, `worsening` u otro tipo no está admitida.
+
+Antes de integrar: un profesional debe revisar cómo se determina que una expresión temporal es explícita y cómo se comunica; responsables jurídicos/éticos deben confirmar finalidad y consentimiento para reutilizar datos entre periodos; y el futuro caso de uso debe comprobar ownership, enrollment, asociación permitida y autorizaciones vigentes antes de preparar snapshots. La asociación 5D.2 sigue denegada en producción por defecto.
+
+### Ejemplo sintético
+
+```json
+{
+  "contractVersion": "1.1",
+  "sessionId": "550e8400-e29b-41d4-a716-446655440001",
+  "conversationId": "550e8400-e29b-41d4-a716-446655440003",
+  "observedAt": "2026-01-10T10:00:00.000Z",
+  "selectedMessageIds": ["550e8400-e29b-41d4-a716-446655440005"],
+  "reportedObservations": [{
+    "observationIndex": 0,
+    "evidenceStatus": "reported",
+    "field": "duration",
+    "text": "Relato sintético de ejemplo.",
+    "sourceMessageIds": ["550e8400-e29b-41d4-a716-446655440005"]
+  }],
+  "temporalContext": null
+}
+```
+
+Con `temporalContext: null`, el resultado es siempre insuficiente para declarar cambio o continuidad, aunque existan observaciones en ambos snapshots. Un fixture unitario puede construir una afirmación temporal explícita y confirmar la forma de salida, pero eso no constituye validación profesional ni autoriza un uso real.
+
+### Riesgos y condiciones para integración futura
+
+El comparador valida consistencia de IDs/índices y pertenencia de referencias, no la semántica ni la autenticidad del texto fuente. No existe todavía un extractor/entrada confiable que identifique expresiones temporales explícitas ni aprobación profesional para su interpretación. No integrar hasta definir esa fuente, revisar lenguaje y criterios profesionalmente, aprobar alcance de consentimiento para reutilización, conservar asociación sesión-conversación en producción denegada por defecto, y probar propiedad/consentimiento y retiro en una futura orquestación. No añadir snapshots persistidos, comparaciones automáticas, scores, severidad, diagnósticos, derivaciones o Safety en este incremento.

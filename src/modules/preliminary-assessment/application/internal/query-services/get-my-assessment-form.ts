@@ -1,5 +1,5 @@
 import { PreliminaryAssessmentError } from '../../../domain/model/assessment-errors.js';
-import { isInstrumentAvailable } from '../../../domain/model/instrument.js';
+import { isInstrumentAvailable, toPublicInstrumentQuestion } from '../../../domain/model/instrument.js';
 import type { InstrumentCatalog } from '../../../domain/repositories/instrument-catalog.js';
 import type { PreliminaryAssessmentRepository } from '../../../domain/repositories/preliminary-assessment-repository.js';
 import type { PreliminaryAssessmentConsentAuthorizer } from '../../ports/preliminary-assessment-consent-authorizer.js';
@@ -36,7 +36,9 @@ export class GetMyAssessmentForm {
         instrumentVersionId: instrument.instrumentVersionId,
         version: instrument.version,
         effectiveAt: instrument.effectiveAt,
-        questions: [...instrument.questions].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)),
+        questions: [...instrument.questions]
+          .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+          .map(toPublicInstrumentQuestion),
       },
     };
   }

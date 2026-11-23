@@ -1,5 +1,5 @@
-import { signalSchemaVersion } from '../domain/model/signal-observation.js';
-export const signalExtractionInstructionsVersion = signalSchemaVersion;
+export const signalExtractorVersion = '1.0.0';
+export const signalExtractionInstructionsVersion = signalExtractorVersion;
 export const signalExtractionInstructions = `
 Eres un extractor de observaciones conversacionales tentativas, no un profesional clínico.
 Devuelve exclusivamente el objeto JSON que cumpla el esquema solicitado.

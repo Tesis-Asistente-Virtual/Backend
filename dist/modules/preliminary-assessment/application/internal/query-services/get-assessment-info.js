@@ -1,4 +1,4 @@
-import { isInstrumentAvailable } from '../../../domain/model/instrument.js';
+import { isInstrumentAvailable, toPublicInstrumentQuestion } from '../../../domain/model/instrument.js';
 export class GetAssessmentInfo {
     instruments;
     clock;
@@ -16,7 +16,7 @@ export class GetAssessmentInfo {
                 instrumentVersionId: item.instrumentVersionId,
                 version: item.version,
                 effectiveAt: item.effectiveAt,
-                questions: item.questions,
+                questions: item.questions.map(toPublicInstrumentQuestion),
             })),
         };
     }

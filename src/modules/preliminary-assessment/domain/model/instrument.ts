@@ -4,6 +4,12 @@ import { PreliminaryAssessmentError } from './assessment-errors.js';
 const optionSchema = z.object({
   id: z.string().trim().min(1).max(80),
   label: z.string().trim().min(1).max(300),
+  /** Server-owned value for deterministic instrument scoring; never accepted in answer bodies. */
+  scoringValue: z.number().int().min(0).max(3).optional(),
+}).strict();
+const publicOptionSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  label: z.string().trim().min(1).max(300),
 }).strict();
 
 const questionBase = {
@@ -14,14 +20,20 @@ const questionBase = {
   displayOrder: z.number().int().min(1).max(200).optional(),
 };
 
-export const instrumentQuestionSchema = z.discriminatedUnion('responseType', [
-  z.object({ ...questionBase, responseType: z.literal('text'), maxLength: z.number().int().min(1).max(2000) }).strict(),
-  z.object({ ...questionBase, responseType: z.literal('single_choice'), options: z.array(optionSchema).min(1).max(50) }).strict(),
-  z.object({ ...questionBase, responseType: z.literal('multiple_choice'), options: z.array(optionSchema).min(1).max(50), maxSelections: z.number().int().min(1).max(50) }).strict(),
-  z.object({ ...questionBase, responseType: z.literal('number'), minimum: z.number().finite(), maximum: z.number().finite() }).strict()
-    .refine(question => question.minimum <= question.maximum, 'Question minimum must not exceed maximum'),
-  z.object({ ...questionBase, responseType: z.literal('boolean') }).strict(),
-]);
+function createInstrumentQuestionSchema<Option extends z.ZodTypeAny>(option: Option) {
+  return z.discriminatedUnion('responseType', [
+    z.object({ ...questionBase, responseType: z.literal('text'), maxLength: z.number().int().min(1).max(2000) }).strict(),
+    z.object({ ...questionBase, responseType: z.literal('single_choice'), options: z.array(option).min(1).max(50) }).strict(),
+    z.object({ ...questionBase, responseType: z.literal('multiple_choice'), options: z.array(option).min(1).max(50), maxSelections: z.number().int().min(1).max(50) }).strict(),
+    z.object({ ...questionBase, responseType: z.literal('number'), minimum: z.number().finite(), maximum: z.number().finite() }).strict()
+      .refine(question => question.minimum <= question.maximum, 'Question minimum must not exceed maximum'),
+    z.object({ ...questionBase, responseType: z.literal('boolean') }).strict(),
+  ]);
+}
+
+export const instrumentQuestionSchema = createInstrumentQuestionSchema(optionSchema);
+/** REST projection schema excludes server-only per-option scoring metadata. */
+export const publicInstrumentQuestionSchema = createInstrumentQuestionSchema(publicOptionSchema);
 
 export const instrumentVersionSchema = z.object({
   instrumentId: z.string().uuid(),
@@ -76,10 +88,22 @@ export const instrumentVersionSchema = z.object({
 });
 
 export type InstrumentQuestion = z.infer<typeof instrumentQuestionSchema>;
+export type PublicInstrumentQuestion = z.infer<typeof publicInstrumentQuestionSchema>;
 export type InstrumentOption = z.infer<typeof optionSchema>;
 export type InstrumentVersion = z.infer<typeof instrumentVersionSchema>;
 export type InstrumentId = string;
 export type InstrumentVersionId = string;
+
+/** Projects an instrument question to its public form without internal scoring metadata. */
+export function toPublicInstrumentQuestion(question: InstrumentQuestion): PublicInstrumentQuestion {
+  if ('options' in question) {
+    return {
+      ...question,
+      options: question.options.map(({ id, label }) => ({ id, label })),
+    } as PublicInstrumentQuestion;
+  }
+  return question;
+}
 
 export function parseInstrumentVersion(value: unknown): InstrumentVersion {
   const parsed = instrumentVersionSchema.safeParse(value);

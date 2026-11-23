@@ -52,11 +52,12 @@ export class Dass21ScoringError extends Error {
   }
 }
 
-const itemsByDimension = {
-  depression: [3, 5, 10, 13, 16, 17, 21],
-  anxiety: [2, 4, 7, 9, 15, 19, 20],
-  stress: [1, 6, 8, 11, 12, 14, 18],
-} as const;
+/** Canonical DASS-21 item assignment reused by scoring and version manifests. */
+export const DASS21_ITEMS_BY_DIMENSION = Object.freeze({
+  depression: Object.freeze([3, 5, 10, 13, 16, 17, 21] as const),
+  anxiety: Object.freeze([2, 4, 7, 9, 15, 19, 20] as const),
+  stress: Object.freeze([1, 6, 8, 11, 12, 14, 18] as const),
+} as const);
 
 /**
  * Pure scoring engine. `itemNumber` is an internal synthetic/test mapping; this
@@ -94,7 +95,7 @@ export function scoreDass21(value: {
   if (byItem.size !== 21) throw new Dass21ScoringError('incomplete_answers');
 
   const dimensions = Object.fromEntries(
-    Object.entries(itemsByDimension).map(([dimension, itemNumbers]) => {
+    Object.entries(DASS21_ITEMS_BY_DIMENSION).map(([dimension, itemNumbers]) => {
       const rawScore = itemNumbers.reduce((sum, itemNumber) => sum + (byItem.get(itemNumber) ?? 0), 0);
       return [dimension, { rawScore, equivalentScore: rawScore * 2 }];
     }),

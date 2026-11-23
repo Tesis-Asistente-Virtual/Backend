@@ -106,8 +106,14 @@ describe('OpenAiConversationSignalExtractor', () => {
       .rejects.toMatchObject({ kind: 'invalid_response' });
     const refusalResponse = response(null, { output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'private refusal text' }] }], output_parsed: null });
     await expect(harness(refusalResponse).extractor.extract(input)).rejects.toMatchObject({ kind: 'refusal' });
-    await expect(harness(response(null, { status: 'incomplete', output_parsed: null })).extractor.extract(input))
-      .rejects.toMatchObject({ kind: 'incomplete_response' });
+    await expect(harness(response(null, {
+      status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_parsed: null,
+    })).extractor.extract(input))
+      .rejects.toMatchObject({ kind: 'incomplete_response', incompleteReason: 'max_output_tokens' });
+    await expect(harness(response(null, {
+      status: 'incomplete', incomplete_details: { reason: 'content_filter' }, output_parsed: null,
+    })).extractor.extract(input))
+      .rejects.toMatchObject({ kind: 'incomplete_response', incompleteReason: 'other' });
   });
 
   it('maps timeout and provider errors without exposing provider messages', async () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { assessmentAnswerSchema } from '../../domain/model/assessment-response.js';
-import { instrumentQuestionSchema } from '../../domain/model/instrument.js';
+import { publicInstrumentQuestionSchema } from '../../domain/model/instrument.js';
 import { startAssessmentBodySchema, submitAssessmentResponseBodySchema } from './validation/assessment-request-schemas.js';
 
 const toSchema = (value: z.ZodType) => z.toJSONSchema(value, { target: 'openapi-3.0' });
@@ -48,7 +48,7 @@ const pageSchema = (item: z.ZodType) => ({
 const response = (description: string, ref: string) => ({ description, content: { 'application/json': { schema: { $ref: ref } } } });
 const orderedInstrumentQuestion = {
   allOf: [
-    toSchema(instrumentQuestionSchema),
+    toSchema(publicInstrumentQuestionSchema),
     { type: 'object', properties: { displayOrder: { type: 'integer', minimum: 1, maximum: 200 } }, required: ['displayOrder'] },
   ],
 };

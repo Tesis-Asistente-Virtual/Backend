@@ -26,6 +26,11 @@ function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
 
+function isMalformedJsonBody(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('type' in error) || !('status' in error)) return false;
+  return error.type === 'entity.parse.failed' && error.status === 400;
+}
+
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (res.headersSent) {
     _next(err);
@@ -33,6 +38,10 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   if (err instanceof ZodError) {
     res.status(400).json({ error: 'Invalid request data' });
+    return;
+  }
+  if (isMalformedJsonBody(err)) {
+    res.status(400).json({ error: 'Invalid JSON body' });
     return;
   }
   if (err instanceof EmailAlreadyRegistered || hasUniqueViolationCode(err)) {
@@ -102,9 +111,11 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   if (err instanceof MonitoringError) {
     if (err.code === 'enrollment_not_found') { res.status(404).json({ error: 'Monitoring enrollment not found' }); return; }
+    if (err.code === 'session_not_found' || err.code === 'conversation_not_found') { res.status(404).json({ error: 'Monitoring session or conversation not found' }); return; }
     if (err.code === 'consent_required') { res.status(403).json({ error: 'Current longitudinal monitoring consent is required' }); return; }
+    if (err.code === 'conversation_association_not_authorized') { res.status(403).json({ error: 'Current notice does not authorize conversation association' }); return; }
     if (err.code === 'consent_unavailable') { res.status(503).json({ error: 'Consent status is temporarily unavailable' }); return; }
-    if (['invalid_transition', 'enrollment_inactive', 'enrollment_already_open', 'session_already_open', 'concurrent_modification'].includes(err.code)) {
+    if (['invalid_transition', 'enrollment_inactive', 'enrollment_already_open', 'session_already_open', 'concurrent_modification', 'session_inactive', 'conversation_inactive', 'conversation_already_associated'].includes(err.code)) {
       res.status(409).json({ error: 'Monitoring operation conflicts with its current state' }); return;
     }
   }
