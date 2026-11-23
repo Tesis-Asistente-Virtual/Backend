@@ -62,6 +62,9 @@ describe('conversation signal extraction HTTP controller', () => {
     await h.controller.execute(h.req, h.res);
     expect(h.res.status).toHaveBeenCalledWith(200);
     expect(h.res.json).toHaveBeenCalledWith({ status: 'completed', ...extraction });
+    expect(Object.keys(h.res.json.mock.calls[0]?.[0] as object).sort()).toEqual([
+      'clarificationQuestions', 'missingInformation', 'observations', 'schemaVersion', 'status',
+    ]);
     expect(execute).toHaveBeenCalledWith(accountId, { conversationId, messageIds: [messageId] }, expect.any(AbortSignal));
 
     const noAuth = harness(service, null);
@@ -91,6 +94,7 @@ describe('conversation signal extraction HTTP controller', () => {
     const execute = vi.fn(async () => extraction);
     const h = harness({ execute });
     await h.controller.generateResult(h.req, h.res);
+    expect(execute).toHaveBeenCalledTimes(1);
     expect(h.res.status).toHaveBeenCalledWith(200);
     const body = h.res.json.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body).toMatchObject({
@@ -103,7 +107,19 @@ describe('conversation signal extraction HTTP controller', () => {
         descriptiveStatus: 'no_observations',
         emptyObservationsMeaning: 'not_evidence_of_absence',
       },
+      preliminaryGuidance: {
+        contractVersion: '1.0',
+        conversationId,
+        sourceMessageIds: [messageId],
+        observations: [],
+        informationGaps: [{ field: 'manifestation', reason: 'not_assessed' }],
+        suggestedFollowUpQuestions: [],
+      },
     });
+    expect(Object.keys(body).sort()).toEqual([
+      'clarificationQuestions', 'conversationId', 'extractorVersion', 'generatedAt', 'id', 'missingInformation',
+      'observations', 'preliminaryGuidance', 'schemaVersion', 'sourceMessageIds', 'status', 'summary',
+    ]);
     expect(body).toHaveProperty('id');
     expect(body).toHaveProperty('generatedAt');
     expect(body).not.toHaveProperty('accountId');

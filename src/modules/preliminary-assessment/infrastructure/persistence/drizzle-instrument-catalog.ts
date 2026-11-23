@@ -7,15 +7,19 @@ import type { InstrumentCatalog, InstrumentPublication, NewInstrumentDraft } fro
 import { assessmentInstrumentQuestions, assessmentInstrumentVersions } from './schema.js';
 
 type InstrumentRow = typeof assessmentInstrumentVersions.$inferSelect;
+type QuestionRow = { definition: unknown; displayOrder: number | null };
 
-function toDomain(row: InstrumentRow, questions: readonly unknown[]): InstrumentVersion {
+function toDomain(row: InstrumentRow, questions: readonly QuestionRow[]): InstrumentVersion {
   return parseInstrumentVersion({
     instrumentId: row.instrumentId,
     instrumentVersionId: row.instrumentVersionId,
     version: row.version,
     effectiveAt: row.effectiveAt,
     status: row.status,
-    questions,
+    questions: questions.map(question => ({
+      ...(typeof question.definition === 'object' && question.definition !== null ? question.definition : {}),
+      ...(question.displayOrder === null ? {} : { displayOrder: question.displayOrder }),
+    })),
     approval: { status: row.approvalStatus, approvedAt: row.approvedAt, approvalReference: row.approvalReference },
     license: { status: row.licenseStatus, reference: row.licenseReference },
   });
@@ -38,6 +42,18 @@ function draftValues(instrument: NewInstrumentDraft) {
   };
 }
 
+function questionRows(instrument: NewInstrumentDraft) {
+  return instrument.questions.map((question, index) => {
+    const { displayOrder, ...definition } = question;
+    return {
+      instrumentVersionId: instrument.instrumentVersionId,
+      questionId: question.id,
+      displayOrder: displayOrder ?? index + 1,
+      definition,
+    };
+  });
+}
+
 export class DrizzleInstrumentCatalog implements InstrumentCatalog {
   constructor(private readonly db: NodePgDatabase<typeof schema>) {}
 
@@ -45,9 +61,7 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
     const values = draftValues(instrument);
     await this.db.transaction(async tx => {
       await tx.insert(assessmentInstrumentVersions).values(values);
-      if (instrument.questions.length > 0) await tx.insert(assessmentInstrumentQuestions).values(instrument.questions.map(question => ({
-        instrumentVersionId: instrument.instrumentVersionId, questionId: question.id, definition: question,
-      })));
+      if (instrument.questions.length > 0) await tx.insert(assessmentInstrumentQuestions).values(questionRows(instrument));
     });
   }
 
@@ -66,9 +80,7 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
         effectiveAt: values.effectiveAt, updatedAt: new Date(),
       }).where(eq(assessmentInstrumentVersions.instrumentVersionId, values.instrumentVersionId));
       await tx.delete(assessmentInstrumentQuestions).where(eq(assessmentInstrumentQuestions.instrumentVersionId, values.instrumentVersionId));
-      if (instrument.questions.length > 0) await tx.insert(assessmentInstrumentQuestions).values(instrument.questions.map(question => ({
-        instrumentVersionId: instrument.instrumentVersionId, questionId: question.id, definition: question,
-      })));
+      if (instrument.questions.length > 0) await tx.insert(assessmentInstrumentQuestions).values(questionRows(instrument));
       return true;
     });
   }
@@ -79,7 +91,7 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
         .where(eq(assessmentInstrumentVersions.instrumentVersionId, versionId)).for('update').limit(1);
       if (!draft || draft.status !== 'draft') return null;
       const questionRows = await tx.select().from(assessmentInstrumentQuestions)
-        .where(eq(assessmentInstrumentQuestions.instrumentVersionId, versionId)).orderBy(asc(assessmentInstrumentQuestions.questionId));
+        .where(eq(assessmentInstrumentQuestions.instrumentVersionId, versionId)).orderBy(asc(assessmentInstrumentQuestions.displayOrder));
       const candidate = toDomain({
         ...draft,
         status: 'approved',
@@ -89,7 +101,7 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
         licenseStatus: publication.license.status,
         licenseReference: publication.license.reference,
         effectiveAt: publication.effectiveAt,
-      }, questionRows.map(item => item.definition));
+      }, questionRows);
       if (!isInstrumentAvailable(candidate)) throw new PreliminaryAssessmentError('instrument_unavailable');
       const [published] = await tx.update(assessmentInstrumentVersions).set({
         status: candidate.status,
@@ -115,8 +127,8 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
     )).limit(1);
     if (!row) return null;
     const questions = await this.db.select().from(assessmentInstrumentQuestions)
-      .where(eq(assessmentInstrumentQuestions.instrumentVersionId, row.instrumentVersionId)).orderBy(asc(assessmentInstrumentQuestions.questionId));
-    return toDomain(row, questions.map(item => item.definition));
+      .where(eq(assessmentInstrumentQuestions.instrumentVersionId, row.instrumentVersionId)).orderBy(asc(assessmentInstrumentQuestions.displayOrder));
+    return toDomain(row, questions);
   }
 
   async findAvailableByVersionId(versionId: string, at: Date): Promise<InstrumentVersion | null> {
@@ -128,8 +140,8 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
     )).limit(1);
     if (!row) return null;
     const questions = await this.db.select().from(assessmentInstrumentQuestions)
-      .where(eq(assessmentInstrumentQuestions.instrumentVersionId, row.instrumentVersionId)).orderBy(asc(assessmentInstrumentQuestions.questionId));
-    const candidate = toDomain(row, questions.map(item => item.definition));
+      .where(eq(assessmentInstrumentQuestions.instrumentVersionId, row.instrumentVersionId)).orderBy(asc(assessmentInstrumentQuestions.displayOrder));
+    const candidate = toDomain(row, questions);
     return isInstrumentAvailable(candidate) ? candidate : null;
   }
 
@@ -146,11 +158,11 @@ export class DrizzleInstrumentCatalog implements InstrumentCatalog {
     if (rows.length === 0) return [];
     const questionRows = await this.db.select().from(assessmentInstrumentQuestions)
       .where(inArray(assessmentInstrumentQuestions.instrumentVersionId, rows.map(row => row.instrumentVersionId)))
-      .orderBy(asc(assessmentInstrumentQuestions.questionId));
-    const byVersion = new Map<string, unknown[]>();
+      .orderBy(asc(assessmentInstrumentQuestions.instrumentVersionId), asc(assessmentInstrumentQuestions.displayOrder));
+    const byVersion = new Map<string, QuestionRow[]>();
     for (const question of questionRows) {
       const list = byVersion.get(question.instrumentVersionId) ?? [];
-      list.push(question.definition);
+      list.push(question);
       byVersion.set(question.instrumentVersionId, list);
     }
     return rows.map(row => toDomain(row, byVersion.get(row.instrumentVersionId) ?? [])).filter(isInstrumentAvailable);

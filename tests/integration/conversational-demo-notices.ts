@@ -5,7 +5,6 @@ import { consentNoticeVersions } from '../../src/modules/consent/infrastructure/
 import type { connectTestDatabase } from './test-database.js';
 
 type TestDatabase = Awaited<ReturnType<typeof connectTestDatabase>>['db'];
-type DemoPurpose = 'ai_conversation_processing' | 'structured_signal_extraction';
 type DemoErrorKind = 'database_unreachable' | 'schema_missing' | 'fixture_conflict' | 'constraint_violation' | 'permission_denied' | 'unknown_database_failure';
 type DemoErrorStage = 'connect' | 'fixture_transaction';
 
@@ -22,9 +21,22 @@ export const conversationalDemoNotices = [
     version: 'demo-4c3-signals-v1',
     content: `${demoLabel} Aviso técnico sintético para demostrar extracción estructurada solamente en tesis_test_db. No es un aviso jurídico, no autoriza el uso con estudiantes reales y no se deben ingresar datos reales.`,
   },
+  {
+    purpose: 'preliminary_assessment',
+    version: 'demo-5a1-assessment-v1',
+    content: `${demoLabel} Aviso técnico sintético para demostrar únicamente los contratos y el flujo de consentimiento de evaluación preliminar en tesis_demo_db. No habilita cuestionarios ni evaluaciones clínicas, no es un aviso jurídico y no autoriza el uso con estudiantes reales.`,
+  },
+  {
+    purpose: 'longitudinal_monitoring',
+    version: 'demo-5a1-monitoring-v1',
+    content: `${demoLabel} Aviso técnico sintético para demostrar únicamente los contratos y el flujo de consentimiento de monitoreo longitudinal en tesis_demo_db. No habilita mediciones ni seguimiento clínico, no es un aviso jurídico y no autoriza el uso con estudiantes reales.`,
+  },
 ] as const satisfies readonly { purpose: ConsentPurpose; version: string; content: string }[];
 
+export const legacyTestDatabaseNotices = conversationalDemoNotices.slice(0, 2);
+
 export type DemoConsentPurpose = typeof conversationalDemoNotices[number]['purpose'];
+type DemoPurpose = DemoConsentPurpose;
 
 interface NoticeRecord {
   id: string;

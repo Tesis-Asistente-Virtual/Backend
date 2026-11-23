@@ -110,7 +110,7 @@ export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssess
     const valid = restorePreliminaryAssessment(assessment);
     if (valid.accountId !== accountId || valid.status === 'completed' || valid.updatedAt <= expectedUpdatedAt) return false;
     return this.db.transaction(async tx => {
-      if (valid.status === 'in_progress') {
+      if (valid.status === 'in_progress' || valid.status === 'paused') {
         await requireCurrentPreliminaryAssessmentConsent(tx, accountId, valid.consentNoticeVersionId, valid.updatedAt);
       }
       const [updated] = await tx.update(preliminaryAssessments).set(assessmentValues(valid)).where(and(

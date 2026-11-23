@@ -3,10 +3,12 @@ import type { GetAssessmentInfo } from '../../../application/internal/query-serv
 import type { ListMyAssessments } from '../../../application/internal/query-services/list-my-assessments.js';
 import type { GetMyAssessment } from '../../../application/internal/query-services/get-my-assessment.js';
 import type { GetMyAssessmentResult } from '../../../application/internal/query-services/get-my-assessment-result.js';
+import type { GetMyAssessmentForm } from '../../../application/internal/query-services/get-my-assessment-form.js';
 import type { StartPreliminaryAssessment } from '../../../application/internal/command-services/start-preliminary-assessment.js';
 import type { SubmitAssessmentResponse } from '../../../application/internal/command-services/submit-assessment-response.js';
 import type { PauseAssessment, ResumeAssessment, WithdrawAssessment } from '../../../application/internal/command-services/change-assessment-state.js';
 import type { CompleteAssessment } from '../../../application/internal/command-services/complete-preliminary-assessment.js';
+import type { ReauthorizeAssessment } from '../../../application/internal/command-services/reauthorize-assessment.js';
 import { assessmentIdParamsSchema, assessmentPaginationSchema, emptyAssessmentBodySchema, startAssessmentBodySchema, submitAssessmentResponseBodySchema } from '../validation/assessment-request-schemas.js';
 import { toAssessmentPageResource, toAssessmentResource, toAssessmentResponseResource, toAssessmentResultResource } from '../transformers/assessment-transformer.js';
 
@@ -16,11 +18,13 @@ export class PreliminaryAssessmentController {
     private readonly start: StartPreliminaryAssessment,
     private readonly list: ListMyAssessments,
     private readonly get: GetMyAssessment,
+    private readonly getForm: GetMyAssessmentForm,
     private readonly submitResponse: SubmitAssessmentResponse,
     private readonly pauseAssessment: PauseAssessment,
     private readonly resumeAssessment: ResumeAssessment,
     private readonly withdrawAssessment: WithdrawAssessment,
     private readonly completeAssessment: CompleteAssessment,
+    private readonly reauthorizeAssessment: ReauthorizeAssessment,
     private readonly getResult: GetMyAssessmentResult,
   ) {}
 
@@ -55,6 +59,20 @@ export class PreliminaryAssessmentController {
     res.status(200).json(toAssessmentResource(await this.get.execute(id, accountId)));
   }
 
+  async getAssessmentForm(req: Request, res: Response): Promise<void> {
+    const accountId = req.auth?.accountId;
+    if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { id } = assessmentIdParamsSchema.parse(req.params);
+    const form = await this.getForm.execute(id, accountId);
+    res.status(200).json({
+      assessment: toAssessmentResource(form.assessment),
+      instrument: {
+        ...form.instrument,
+        effectiveAt: form.instrument.effectiveAt.toISOString(),
+      },
+    });
+  }
+
   async submit(req: Request, res: Response): Promise<void> {
     const accountId = req.auth?.accountId;
     if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
@@ -77,6 +95,14 @@ export class PreliminaryAssessmentController {
   pause(req: Request, res: Response): Promise<void> { return this.changeState(req, res, 'pause'); }
   resume(req: Request, res: Response): Promise<void> { return this.changeState(req, res, 'resume'); }
   withdraw(req: Request, res: Response): Promise<void> { return this.changeState(req, res, 'withdraw'); }
+
+  async reauthorize(req: Request, res: Response): Promise<void> {
+    const accountId = req.auth?.accountId;
+    if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { id } = assessmentIdParamsSchema.parse(req.params);
+    emptyAssessmentBodySchema.parse(req.body ?? {});
+    res.status(200).json(toAssessmentResource(await this.reauthorizeAssessment.execute(id, accountId)));
+  }
 
   async complete(req: Request, res: Response): Promise<void> {
     const accountId = req.auth?.accountId;

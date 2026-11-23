@@ -89,6 +89,8 @@ Campos principales del response:
 | `missingInformation` | Campos faltantes con razón explícita, como `not_reported`, `ambiguous` o `not_assessed`. |
 | `sourceMessageIds` | Mensajes completados seleccionados en la solicitud y validados como fuente. |
 
+El response también incluye `preliminaryGuidance`, un contrato aditivo versionado (`contractVersion: "1.0"`) para presentación al estudiante. `observations` se mapea determinísticamente desde `summary.reportedFacts`, conserva el índice de observación y los IDs fuente, y no parafrasea el texto. `informationGaps` y `suggestedFollowUpQuestions` reutilizan las listas validadas del resultado existente. `generalGuidance` y `limitations` son textos fijos, no generados por IA ni personalizados. El esquema estricto no admite diagnósticos, scores, severidad ni confianza. La redacción fija requiere revisión profesional antes de presentarla a estudiantes en un piloto.
+
 El request exacto es un objeto estricto con `messageIds`: entre 1 y 20 UUID únicos. No acepta `accountId` ni otras propiedades:
 
 ```json
@@ -118,7 +120,7 @@ El `accountId` forma parte del resultado interno para representar el dueño auto
 
 `descriptiveStatus` solo indica si el extractor devolvió observaciones. Si el arreglo está vacío, `emptyObservationsMeaning` declara que eso no es evidencia de ausencia. `clarificationQuestions` conserva las preguntas estructuradas ya validadas. La lista de límites impide interpretar el objeto como diagnóstico, severidad clínica o evaluación de seguridad.
 
-No se incluyen razonamiento interno, confianza no calibrada, puntuaciones ni prioridades clínicas.
+No se incluyen razonamiento interno, confianza no calibrada, puntuaciones ni prioridades clínicas. El contrato `preliminaryGuidance` distingue lo observado, lo faltante y la orientación general sin transformar la ausencia de evidencia en ausencia de dificultades.
 
 ## Consentimiento y privacidad
 

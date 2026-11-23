@@ -6,6 +6,7 @@ import {
   expireAssessment,
   pauseAssessment,
   recordAssessmentResponse,
+  reauthorizeAssessment,
   resumeAssessment,
   withdrawAssessment,
 } from '../../../src/modules/preliminary-assessment/domain/model/preliminary-assessment.js';
@@ -15,15 +16,16 @@ import { upsertAssessmentResponse } from '../../../src/modules/preliminary-asses
 import { isInstrumentAvailable, parseInstrumentVersion, type InstrumentVersion } from '../../../src/modules/preliminary-assessment/domain/model/instrument.js';
 
 function approvedInstrument(overrides: Partial<InstrumentVersion> = {}): InstrumentVersion {
+  const questions = (overrides.questions ?? [{
+    id: randomUUID(), prompt: 'Fictional neutral question', responseType: 'text' as const, required: true, maxLength: 200,
+  }]).map((question, index) => ({ ...question, displayOrder: question.displayOrder ?? index + 1 }));
   return parseInstrumentVersion({
     instrumentId: randomUUID(),
     instrumentVersionId: randomUUID(),
     version: 'fixture-1',
     effectiveAt: new Date('2026-01-01T00:00:00.000Z'),
     status: 'approved',
-    questions: [{
-      id: randomUUID(), prompt: 'Fictional neutral question', responseType: 'text', required: true, maxLength: 200,
-    }],
+    questions,
     approval: { status: 'approved', approvedAt: new Date('2026-01-01T00:00:00.000Z'), approvalReference: 'fictional-test-approval' },
     license: { status: 'authorized', reference: 'fictional-test-license' },
     ...overrides,
@@ -59,6 +61,35 @@ describe('PreliminaryAssessment domain', () => {
     expect(withdrawn).toMatchObject({ status: 'withdrawn', withdrawnAt: new Date('2026-04-01T00:03:00.000Z') });
     expect(() => resumeAssessment(withdrawn, new Date('2026-04-01T00:04:00.000Z'))).toThrow(PreliminaryAssessmentError);
     expect(expireAssessment(initial, new Date('2026-04-02T00:00:00.000Z')).status).toBe('expired');
+  });
+
+  it('requires a complete, unique, contiguous explicit order for an instrument to be available', () => {
+    const ordered = approvedInstrument({ questions: [
+      { id: randomUUID(), prompt: 'Fictional position two', responseType: 'boolean', required: true, displayOrder: 2 },
+      { id: randomUUID(), prompt: 'Fictional position one', responseType: 'boolean', required: true, displayOrder: 1 },
+    ] });
+    expect(isInstrumentAvailable(ordered)).toBe(true);
+    expect([...ordered.questions].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)).map(q => q.displayOrder)).toEqual([1, 2]);
+
+    const duplicate = { ...ordered, questions: ordered.questions.map(q => ({ ...q, displayOrder: 1 })) };
+    expect(() => parseInstrumentVersion(duplicate)).toThrow(PreliminaryAssessmentError);
+    const missing = { ...ordered, questions: ordered.questions.map(({ displayOrder: _order, ...q }) => q) };
+    expect(isInstrumentAvailable(missing)).toBe(false);
+  });
+
+  it('rebinds an open assessment only to a valid new notice and never reauthorizes a closed one', () => {
+    const initial = newAssessment('structured_instrument', randomUUID());
+    const newerNotice = randomUUID();
+    const changed = reauthorizeAssessment(initial, newerNotice, new Date(initial.updatedAt.getTime() + 1));
+    expect(changed).toMatchObject({ status: 'in_progress', consentNoticeVersionId: newerNotice });
+    expect(reauthorizeAssessment(changed, newerNotice, new Date(changed.updatedAt.getTime() + 1))).toBe(changed);
+    const paused = pauseAssessment(initial, new Date(initial.updatedAt.getTime() + 1));
+    expect(reauthorizeAssessment(paused, newerNotice, new Date(paused.updatedAt.getTime() + 1)).status).toBe('paused');
+    const completed = completeAssessment(newAssessment(), new Date(initial.updatedAt.getTime() + 1));
+    expect(() => reauthorizeAssessment(completed, newerNotice, new Date(completed.updatedAt.getTime() + 2))).toThrowError(
+      expect.objectContaining({ code: 'assessment_closed' }),
+    );
+    expect(() => reauthorizeAssessment(initial, 'not-a-uuid', new Date(initial.updatedAt.getTime() + 1))).toThrow(PreliminaryAssessmentError);
   });
 
   it('completes idempotently and does not infer score, interpretation, priority, or safety', () => {

@@ -1,0 +1,2312 @@
+{
+  "id": "c4c540da-e187-44f2-8a1c-12cdb431d628",
+  "prevId": "7f0bd988-8721-4cd4-9504-a23af173f7a0",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.auth_accounts": {
+      "name": "auth_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(320)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_accounts_email_unique": {
+          "name": "auth_accounts_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_sessions": {
+      "name": "auth_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "refresh_token_hash": {
+          "name": "refresh_token_hash",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "auth_sessions_account_id_auth_accounts_id_fk": {
+          "name": "auth_sessions_account_id_auth_accounts_id_fk",
+          "tableFrom": "auth_sessions",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_profiles": {
+      "name": "user_profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_name": {
+          "name": "first_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_name": {
+          "name": "last_name",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_profiles_account_id_auth_accounts_id_fk": {
+          "name": "user_profiles_account_id_auth_accounts_id_fk",
+          "tableFrom": "user_profiles",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "user_profiles_account_id_unique": {
+          "name": "user_profiles_account_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.conversation_messages": {
+      "name": "conversation_messages",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conversation_id": {
+          "name": "conversation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'completed'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "conversation_messages_conversation_created_id_idx": {
+          "name": "conversation_messages_conversation_created_id_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "conversation_messages_conversation_id_conversations_id_fk": {
+          "name": "conversation_messages_conversation_id_conversations_id_fk",
+          "tableFrom": "conversation_messages",
+          "tableTo": "conversations",
+          "columnsFrom": [
+            "conversation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "conversation_messages_role_check": {
+          "name": "conversation_messages_role_check",
+          "value": "\"conversation_messages\".\"role\" in ('user', 'assistant')"
+        },
+        "conversation_messages_status_check": {
+          "name": "conversation_messages_status_check",
+          "value": "\"conversation_messages\".\"status\" in ('generating', 'completed', 'failed')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.conversations": {
+      "name": "conversations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar(150)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "conversations_account_created_idx": {
+          "name": "conversations_account_created_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "conversations_account_id_auth_accounts_id_fk": {
+          "name": "conversations_account_id_auth_accounts_id_fk",
+          "tableFrom": "conversations",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "conversations_status_check": {
+          "name": "conversations_status_check",
+          "value": "\"conversations\".\"status\" in ('active', 'archived')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.account_consent_events": {
+      "name": "account_consent_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "account_consent_events_sequence_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "notice_version_id": {
+          "name": "notice_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "account_consent_account_idempotency_uq": {
+          "name": "account_consent_account_idempotency_uq",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_consent_sequence_uq": {
+          "name": "account_consent_sequence_uq",
+          "columns": [
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "account_consent_status_idx": {
+          "name": "account_consent_status_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sequence",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "account_consent_events_account_id_auth_accounts_id_fk": {
+          "name": "account_consent_events_account_id_auth_accounts_id_fk",
+          "tableFrom": "account_consent_events",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "account_consent_events_notice_version_id_consent_notice_versions_id_fk": {
+          "name": "account_consent_events_notice_version_id_consent_notice_versions_id_fk",
+          "tableFrom": "account_consent_events",
+          "tableTo": "consent_notice_versions",
+          "columnsFrom": [
+            "notice_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "account_consent_purpose_check": {
+          "name": "account_consent_purpose_check",
+          "value": "\"account_consent_events\".\"purpose\" in ('ai_conversation_processing', 'structured_signal_extraction', 'longitudinal_monitoring', 'preliminary_assessment')"
+        },
+        "account_consent_action_check": {
+          "name": "account_consent_action_check",
+          "value": "\"account_consent_events\".\"action\" in ('granted', 'declined', 'withdrawn')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.consent_notice_versions": {
+      "name": "consent_notice_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "purpose": {
+          "name": "purpose",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content": {
+          "name": "content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "effective_at": {
+          "name": "effective_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "consent_notice_purpose_version_uq": {
+          "name": "consent_notice_purpose_version_uq",
+          "columns": [
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "consent_notice_one_published_per_purpose_uq": {
+          "name": "consent_notice_one_published_per_purpose_uq",
+          "columns": [
+            {
+              "expression": "purpose",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"consent_notice_versions\".\"status\" = 'published'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "consent_notice_purpose_check": {
+          "name": "consent_notice_purpose_check",
+          "value": "\"consent_notice_versions\".\"purpose\" in ('ai_conversation_processing', 'structured_signal_extraction', 'longitudinal_monitoring', 'preliminary_assessment')"
+        },
+        "consent_notice_status_check": {
+          "name": "consent_notice_status_check",
+          "value": "\"consent_notice_versions\".\"status\" in ('draft', 'published', 'superseded')"
+        },
+        "consent_notice_hash_check": {
+          "name": "consent_notice_hash_check",
+          "value": "\"consent_notice_versions\".\"content_hash\" ~ '^[0-9a-f]{64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_answers": {
+      "name": "assessment_answers",
+      "schema": "",
+      "columns": {
+        "answer_id": {
+          "name": "answer_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "assessment_id": {
+          "name": "assessment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answer": {
+          "name": "answer",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assessment_answers_assessment_question_uq": {
+          "name": "assessment_answers_assessment_question_uq",
+          "columns": [
+            {
+              "expression": "assessment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assessment_answers_assessment_version_idx": {
+          "name": "assessment_answers_assessment_version_idx",
+          "columns": [
+            {
+              "expression": "assessment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "instrument_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assessment_answers_assessment_id_preliminary_assessments_assessment_id_fk": {
+          "name": "assessment_answers_assessment_id_preliminary_assessments_assessment_id_fk",
+          "tableFrom": "assessment_answers",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id"
+          ],
+          "columnsTo": [
+            "assessment_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_answers_assessment_version_fk": {
+          "name": "assessment_answers_assessment_version_fk",
+          "tableFrom": "assessment_answers",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_answers_question_version_fk": {
+          "name": "assessment_answers_question_version_fk",
+          "tableFrom": "assessment_answers",
+          "tableTo": "assessment_instrument_questions",
+          "columnsFrom": [
+            "instrument_version_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id",
+            "question_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "assessment_answer_status_check": {
+          "name": "assessment_answer_status_check",
+          "value": "\"assessment_answers\".\"status\" in ('pending', 'answered')"
+        },
+        "assessment_answer_payload_check": {
+          "name": "assessment_answer_payload_check",
+          "value": "(\"assessment_answers\".\"status\" = 'pending' AND \"assessment_answers\".\"answer\" IS NULL) OR (\"assessment_answers\".\"status\" = 'answered' AND \"assessment_answers\".\"answer\" IS NOT NULL AND jsonb_typeof(\"assessment_answers\".\"answer\") = 'object')"
+        },
+        "assessment_answer_timestamps_check": {
+          "name": "assessment_answer_timestamps_check",
+          "value": "\"assessment_answers\".\"created_at\" <= \"assessment_answers\".\"updated_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_instrument_questions": {
+      "name": "assessment_instrument_questions",
+      "schema": "",
+      "columns": {
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_order": {
+          "name": "display_order",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "definition": {
+          "name": "definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "assessment_instrument_questions_version_idx": {
+          "name": "assessment_instrument_questions_version_idx",
+          "columns": [
+            {
+              "expression": "instrument_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assessment_instrument_questions_order_uq": {
+          "name": "assessment_instrument_questions_order_uq",
+          "columns": [
+            {
+              "expression": "instrument_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "display_order",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"assessment_instrument_questions\".\"display_order\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assessment_instrument_questions_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk": {
+          "name": "assessment_instrument_questions_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk",
+          "tableFrom": "assessment_instrument_questions",
+          "tableTo": "assessment_instrument_versions",
+          "columnsFrom": [
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "assessment_instrument_questions_pk": {
+          "name": "assessment_instrument_questions_pk",
+          "columns": [
+            "instrument_version_id",
+            "question_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "assessment_instrument_question_display_order_check": {
+          "name": "assessment_instrument_question_display_order_check",
+          "value": "\"assessment_instrument_questions\".\"display_order\" IS NULL OR \"assessment_instrument_questions\".\"display_order\" BETWEEN 1 AND 200"
+        },
+        "assessment_instrument_question_definition_check": {
+          "name": "assessment_instrument_question_definition_check",
+          "value": "jsonb_typeof(\"assessment_instrument_questions\".\"definition\") = 'object' AND \"assessment_instrument_questions\".\"definition\"->>'id' IS NOT NULL AND \"assessment_instrument_questions\".\"definition\"->>'id' = \"assessment_instrument_questions\".\"question_id\"::text"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_instrument_versions": {
+      "name": "assessment_instrument_versions",
+      "schema": "",
+      "columns": {
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "approval_status": {
+          "name": "approval_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "approval_reference": {
+          "name": "approval_reference",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "license_status": {
+          "name": "license_status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'not_reviewed'"
+        },
+        "license_reference": {
+          "name": "license_reference",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "effective_at": {
+          "name": "effective_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assessment_instrument_id_version_uq": {
+          "name": "assessment_instrument_id_version_uq",
+          "columns": [
+            {
+              "expression": "instrument_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assessment_instrument_version_id_instrument_id_uq": {
+          "name": "assessment_instrument_version_id_instrument_id_uq",
+          "columns": [
+            {
+              "expression": "instrument_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "instrument_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assessment_instrument_available_idx": {
+          "name": "assessment_instrument_available_idx",
+          "columns": [
+            {
+              "expression": "instrument_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "effective_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "assessment_instrument_status_check": {
+          "name": "assessment_instrument_status_check",
+          "value": "\"assessment_instrument_versions\".\"status\" in ('draft', 'approved', 'retired')"
+        },
+        "assessment_instrument_approval_check": {
+          "name": "assessment_instrument_approval_check",
+          "value": "\"assessment_instrument_versions\".\"approval_status\" in ('pending', 'approved', 'rejected')"
+        },
+        "assessment_instrument_license_check": {
+          "name": "assessment_instrument_license_check",
+          "value": "\"assessment_instrument_versions\".\"license_status\" in ('not_reviewed', 'authorized', 'restricted', 'not_applicable')"
+        },
+        "assessment_instrument_publication_check": {
+          "name": "assessment_instrument_publication_check",
+          "value": "\"assessment_instrument_versions\".\"status\" <> 'approved' OR (\"assessment_instrument_versions\".\"approval_status\" = 'approved' AND \"assessment_instrument_versions\".\"approved_at\" IS NOT NULL AND \"assessment_instrument_versions\".\"approval_reference\" IS NOT NULL AND \"assessment_instrument_versions\".\"license_status\" IN ('authorized', 'not_applicable'))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_psychometric_scores": {
+      "name": "assessment_psychometric_scores",
+      "schema": "",
+      "columns": {
+        "score_id": {
+          "name": "score_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "assessment_id": {
+          "name": "assessment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mapping_id": {
+          "name": "mapping_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mapping_version": {
+          "name": "mapping_version",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scoring_version": {
+          "name": "scoring_version",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depression_raw_score": {
+          "name": "depression_raw_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "depression_equivalent_score": {
+          "name": "depression_equivalent_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "anxiety_raw_score": {
+          "name": "anxiety_raw_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "anxiety_equivalent_score": {
+          "name": "anxiety_equivalent_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stress_raw_score": {
+          "name": "stress_raw_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stress_equivalent_score": {
+          "name": "stress_equivalent_score",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "calculated_at": {
+          "name": "calculated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "assessment_psychometric_scores_assessment_uq": {
+          "name": "assessment_psychometric_scores_assessment_uq",
+          "columns": [
+            {
+              "expression": "assessment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "assessment_psychometric_scores_owner_time_idx": {
+          "name": "assessment_psychometric_scores_owner_time_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "calculated_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "score_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assessment_psychometric_scores_assessment_owner_fk": {
+          "name": "assessment_psychometric_scores_assessment_owner_fk",
+          "tableFrom": "assessment_psychometric_scores",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "assessment_id",
+            "account_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_psychometric_scores_assessment_version_fk": {
+          "name": "assessment_psychometric_scores_assessment_version_fk",
+          "tableFrom": "assessment_psychometric_scores",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_psychometric_scores_instrument_fk": {
+          "name": "assessment_psychometric_scores_instrument_fk",
+          "tableFrom": "assessment_psychometric_scores",
+          "tableTo": "assessment_instrument_versions",
+          "columnsFrom": [
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "assessment_psychometric_scores_mapping_fk": {
+          "name": "assessment_psychometric_scores_mapping_fk",
+          "tableFrom": "assessment_psychometric_scores",
+          "tableTo": "assessment_scoring_mapping_versions",
+          "columnsFrom": [
+            "mapping_id",
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "mapping_id",
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "assessment_psychometric_scores_status_check": {
+          "name": "assessment_psychometric_scores_status_check",
+          "value": "\"assessment_psychometric_scores\".\"status\" = 'calculated'"
+        },
+        "assessment_psychometric_scores_schema_check": {
+          "name": "assessment_psychometric_scores_schema_check",
+          "value": "\"assessment_psychometric_scores\".\"schema_version\" = '1.0'"
+        },
+        "assessment_psychometric_scores_mapping_version_check": {
+          "name": "assessment_psychometric_scores_mapping_version_check",
+          "value": "length(trim(\"assessment_psychometric_scores\".\"mapping_version\")) > 0 AND length(trim(\"assessment_psychometric_scores\".\"scoring_version\")) > 0"
+        },
+        "assessment_psychometric_scores_depression_check": {
+          "name": "assessment_psychometric_scores_depression_check",
+          "value": "\"assessment_psychometric_scores\".\"depression_raw_score\" between 0 and 21 AND \"assessment_psychometric_scores\".\"depression_equivalent_score\" = \"assessment_psychometric_scores\".\"depression_raw_score\" * 2"
+        },
+        "assessment_psychometric_scores_anxiety_check": {
+          "name": "assessment_psychometric_scores_anxiety_check",
+          "value": "\"assessment_psychometric_scores\".\"anxiety_raw_score\" between 0 and 21 AND \"assessment_psychometric_scores\".\"anxiety_equivalent_score\" = \"assessment_psychometric_scores\".\"anxiety_raw_score\" * 2"
+        },
+        "assessment_psychometric_scores_stress_check": {
+          "name": "assessment_psychometric_scores_stress_check",
+          "value": "\"assessment_psychometric_scores\".\"stress_raw_score\" between 0 and 21 AND \"assessment_psychometric_scores\".\"stress_equivalent_score\" = \"assessment_psychometric_scores\".\"stress_raw_score\" * 2"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_results": {
+      "name": "assessment_results",
+      "schema": "",
+      "columns": {
+        "result_id": {
+          "name": "result_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "assessment_id": {
+          "name": "assessment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "schema_version": {
+          "name": "schema_version",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_scores": {
+          "name": "instrument_scores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "interpretation": {
+          "name": "interpretation",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attention_priority": {
+          "name": "attention_priority",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "safety_state": {
+          "name": "safety_state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "assessment_results_assessment_uq": {
+          "name": "assessment_results_assessment_uq",
+          "columns": [
+            {
+              "expression": "assessment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "assessment_results_assessment_id_preliminary_assessments_assessment_id_fk": {
+          "name": "assessment_results_assessment_id_preliminary_assessments_assessment_id_fk",
+          "tableFrom": "assessment_results",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id"
+          ],
+          "columnsTo": [
+            "assessment_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_results_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk": {
+          "name": "assessment_results_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk",
+          "tableFrom": "assessment_results",
+          "tableTo": "assessment_instrument_versions",
+          "columnsFrom": [
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "assessment_results_version_match_fk": {
+          "name": "assessment_results_version_match_fk",
+          "tableFrom": "assessment_results",
+          "tableTo": "preliminary_assessments",
+          "columnsFrom": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "assessment_id",
+            "instrument_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "assessment_result_schema_version_check": {
+          "name": "assessment_result_schema_version_check",
+          "value": "\"assessment_results\".\"schema_version\" = '1.0'"
+        },
+        "assessment_result_scores_unavailable_check": {
+          "name": "assessment_result_scores_unavailable_check",
+          "value": "jsonb_typeof(\"assessment_results\".\"instrument_scores\") = 'object' AND \"assessment_results\".\"instrument_scores\"->>'status' IS NOT NULL AND \"assessment_results\".\"instrument_scores\"->>'status' = 'not_available'"
+        },
+        "assessment_result_interpretation_unavailable_check": {
+          "name": "assessment_result_interpretation_unavailable_check",
+          "value": "jsonb_typeof(\"assessment_results\".\"interpretation\") = 'object' AND \"assessment_results\".\"interpretation\"->>'status' IS NOT NULL AND \"assessment_results\".\"interpretation\"->>'status' = 'not_available'"
+        },
+        "assessment_result_priority_unavailable_check": {
+          "name": "assessment_result_priority_unavailable_check",
+          "value": "jsonb_typeof(\"assessment_results\".\"attention_priority\") = 'object' AND \"assessment_results\".\"attention_priority\"->>'status' IS NOT NULL AND \"assessment_results\".\"attention_priority\"->>'status' = 'not_available'"
+        },
+        "assessment_result_safety_unassessed_check": {
+          "name": "assessment_result_safety_unassessed_check",
+          "value": "jsonb_typeof(\"assessment_results\".\"safety_state\") = 'object' AND \"assessment_results\".\"safety_state\"->>'status' IS NOT NULL AND \"assessment_results\".\"safety_state\"->>'status' = 'not_available' AND \"assessment_results\".\"safety_state\"->>'reason' IS NOT NULL AND \"assessment_results\".\"safety_state\"->>'reason' = 'not_assessed'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_scoring_item_mappings": {
+      "name": "assessment_scoring_item_mappings",
+      "schema": "",
+      "columns": {
+        "mapping_id": {
+          "name": "mapping_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_number": {
+          "name": "item_number",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "assessment_scoring_item_mapping_version_fk": {
+          "name": "assessment_scoring_item_mapping_version_fk",
+          "tableFrom": "assessment_scoring_item_mappings",
+          "tableTo": "assessment_scoring_mapping_versions",
+          "columnsFrom": [
+            "mapping_id",
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "mapping_id",
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "assessment_scoring_item_mapping_question_fk": {
+          "name": "assessment_scoring_item_mapping_question_fk",
+          "tableFrom": "assessment_scoring_item_mappings",
+          "tableTo": "assessment_instrument_questions",
+          "columnsFrom": [
+            "instrument_version_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id",
+            "question_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "assessment_scoring_item_mapping_pk": {
+          "name": "assessment_scoring_item_mapping_pk",
+          "columns": [
+            "mapping_id",
+            "question_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "assessment_scoring_item_mapping_item_uq": {
+          "name": "assessment_scoring_item_mapping_item_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "mapping_id",
+            "item_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "assessment_scoring_item_mapping_number_check": {
+          "name": "assessment_scoring_item_mapping_number_check",
+          "value": "\"assessment_scoring_item_mappings\".\"item_number\" between 1 and 21"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.assessment_scoring_mapping_versions": {
+      "name": "assessment_scoring_mapping_versions",
+      "schema": "",
+      "columns": {
+        "mapping_id": {
+          "name": "mapping_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mapping_version": {
+          "name": "mapping_version",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'draft'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "frozen_at": {
+          "name": "frozen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "assessment_scoring_mapping_instrument_fk": {
+          "name": "assessment_scoring_mapping_instrument_fk",
+          "tableFrom": "assessment_scoring_mapping_versions",
+          "tableTo": "assessment_instrument_versions",
+          "columnsFrom": [
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id",
+            "instrument_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "assessment_scoring_mapping_version_uq": {
+          "name": "assessment_scoring_mapping_version_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "instrument_version_id",
+            "mapping_version"
+          ]
+        },
+        "assessment_scoring_mapping_identity_uq": {
+          "name": "assessment_scoring_mapping_identity_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "mapping_id",
+            "instrument_version_id",
+            "instrument_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "assessment_scoring_mapping_status_check": {
+          "name": "assessment_scoring_mapping_status_check",
+          "value": "\"assessment_scoring_mapping_versions\".\"status\" in ('draft', 'frozen')"
+        },
+        "assessment_scoring_mapping_frozen_check": {
+          "name": "assessment_scoring_mapping_frozen_check",
+          "value": "(\"assessment_scoring_mapping_versions\".\"status\" = 'frozen') = (\"assessment_scoring_mapping_versions\".\"frozen_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.preliminary_assessments": {
+      "name": "preliminary_assessments",
+      "schema": "",
+      "columns": {
+        "assessment_id": {
+          "name": "assessment_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "assessment_type": {
+          "name": "assessment_type",
+          "type": "varchar(80)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mode": {
+          "name": "mode",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'in_progress'"
+        },
+        "instrument_version_id": {
+          "name": "instrument_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "consent_notice_version_id": {
+          "name": "consent_notice_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "withdrawn_at": {
+          "name": "withdrawn_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "preliminary_assessments_account_created_idx": {
+          "name": "preliminary_assessments_account_created_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "assessment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "preliminary_assessments_account_id_auth_accounts_id_fk": {
+          "name": "preliminary_assessments_account_id_auth_accounts_id_fk",
+          "tableFrom": "preliminary_assessments",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "preliminary_assessments_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk": {
+          "name": "preliminary_assessments_instrument_version_id_assessment_instrument_versions_instrument_version_id_fk",
+          "tableFrom": "preliminary_assessments",
+          "tableTo": "assessment_instrument_versions",
+          "columnsFrom": [
+            "instrument_version_id"
+          ],
+          "columnsTo": [
+            "instrument_version_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "preliminary_assessments_consent_notice_version_id_consent_notice_versions_id_fk": {
+          "name": "preliminary_assessments_consent_notice_version_id_consent_notice_versions_id_fk",
+          "tableFrom": "preliminary_assessments",
+          "tableTo": "consent_notice_versions",
+          "columnsFrom": [
+            "consent_notice_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "preliminary_assessments_id_instrument_version_uq": {
+          "name": "preliminary_assessments_id_instrument_version_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "assessment_id",
+            "instrument_version_id"
+          ]
+        },
+        "preliminary_assessments_id_account_uq": {
+          "name": "preliminary_assessments_id_account_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "assessment_id",
+            "account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "preliminary_assessment_status_check": {
+          "name": "preliminary_assessment_status_check",
+          "value": "\"preliminary_assessments\".\"status\" in ('in_progress', 'paused', 'completed', 'withdrawn', 'expired')"
+        },
+        "preliminary_assessment_mode_check": {
+          "name": "preliminary_assessment_mode_check",
+          "value": "\"preliminary_assessments\".\"mode\" in ('conversational_contextual', 'structured_instrument')"
+        },
+        "preliminary_assessment_instrument_mode_check": {
+          "name": "preliminary_assessment_instrument_mode_check",
+          "value": "(\"preliminary_assessments\".\"mode\" = 'structured_instrument') = (\"preliminary_assessments\".\"instrument_version_id\" IS NOT NULL)"
+        },
+        "preliminary_assessment_completion_check": {
+          "name": "preliminary_assessment_completion_check",
+          "value": "(\"preliminary_assessments\".\"status\" = 'completed') = (\"preliminary_assessments\".\"completed_at\" IS NOT NULL)"
+        },
+        "preliminary_assessment_withdrawal_check": {
+          "name": "preliminary_assessment_withdrawal_check",
+          "value": "(\"preliminary_assessments\".\"status\" = 'withdrawn') = (\"preliminary_assessments\".\"withdrawn_at\" IS NOT NULL)"
+        },
+        "preliminary_assessment_timestamps_check": {
+          "name": "preliminary_assessment_timestamps_check",
+          "value": "\"preliminary_assessments\".\"created_at\" <= \"preliminary_assessments\".\"started_at\" AND \"preliminary_assessments\".\"started_at\" <= \"preliminary_assessments\".\"updated_at\" AND (\"preliminary_assessments\".\"completed_at\" IS NULL OR \"preliminary_assessments\".\"started_at\" <= \"preliminary_assessments\".\"completed_at\") AND (\"preliminary_assessments\".\"withdrawn_at\" IS NULL OR \"preliminary_assessments\".\"started_at\" <= \"preliminary_assessments\".\"withdrawn_at\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.monitoring_enrollments": {
+      "name": "monitoring_enrollments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consent_purpose": {
+          "name": "consent_purpose",
+          "type": "varchar(40)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'longitudinal_monitoring'"
+        },
+        "consent_notice_version_id": {
+          "name": "consent_notice_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_version": {
+          "name": "contract_version",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consented_at": {
+          "name": "consented_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enrolled_at": {
+          "name": "enrolled_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_changed_at": {
+          "name": "status_changed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "monitoring_enrollments_one_open_uq": {
+          "name": "monitoring_enrollments_one_open_uq",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"monitoring_enrollments\".\"status\" in ('active', 'paused')",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "monitoring_enrollments_owner_created_idx": {
+          "name": "monitoring_enrollments_owner_created_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "enrolled_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "monitoring_enrollments_account_id_auth_accounts_id_fk": {
+          "name": "monitoring_enrollments_account_id_auth_accounts_id_fk",
+          "tableFrom": "monitoring_enrollments",
+          "tableTo": "auth_accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "monitoring_enrollments_id_account_uq": {
+          "name": "monitoring_enrollments_id_account_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "monitoring_enrollments_status_ck": {
+          "name": "monitoring_enrollments_status_ck",
+          "value": "\"monitoring_enrollments\".\"status\" in ('active', 'paused', 'withdrawn', 'completed')"
+        },
+        "monitoring_enrollments_purpose_ck": {
+          "name": "monitoring_enrollments_purpose_ck",
+          "value": "\"monitoring_enrollments\".\"consent_purpose\" = 'longitudinal_monitoring'"
+        },
+        "monitoring_enrollments_contract_ck": {
+          "name": "monitoring_enrollments_contract_ck",
+          "value": "\"monitoring_enrollments\".\"contract_version\" = '1.0'"
+        },
+        "monitoring_enrollments_revision_ck": {
+          "name": "monitoring_enrollments_revision_ck",
+          "value": "\"monitoring_enrollments\".\"revision\" > 0"
+        },
+        "monitoring_enrollments_time_ck": {
+          "name": "monitoring_enrollments_time_ck",
+          "value": "\"monitoring_enrollments\".\"consented_at\" <= \"monitoring_enrollments\".\"enrolled_at\" and \"monitoring_enrollments\".\"enrolled_at\" <= \"monitoring_enrollments\".\"updated_at\" and \"monitoring_enrollments\".\"status_changed_at\" <= \"monitoring_enrollments\".\"updated_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.monitoring_sessions": {
+      "name": "monitoring_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contract_version": {
+          "name": "contract_version",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {
+        "monitoring_sessions_id_owner_uq": {
+          "name": "monitoring_sessions_id_owner_uq",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "monitoring_sessions_one_open_uq": {
+          "name": "monitoring_sessions_one_open_uq",
+          "columns": [
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"monitoring_sessions\".\"status\" = 'in_progress'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "monitoring_sessions_owner_enrollment_idx": {
+          "name": "monitoring_sessions_owner_enrollment_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "enrollment_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "opened_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "monitoring_sessions_enrollment_owner_fk": {
+          "name": "monitoring_sessions_enrollment_owner_fk",
+          "tableFrom": "monitoring_sessions",
+          "tableTo": "monitoring_enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "account_id"
+          ],
+          "columnsTo": [
+            "id",
+            "account_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "monitoring_sessions_status_ck": {
+          "name": "monitoring_sessions_status_ck",
+          "value": "\"monitoring_sessions\".\"status\" in ('in_progress', 'completed', 'abandoned')"
+        },
+        "monitoring_sessions_contract_ck": {
+          "name": "monitoring_sessions_contract_ck",
+          "value": "\"monitoring_sessions\".\"contract_version\" = '1.0'"
+        },
+        "monitoring_sessions_revision_ck": {
+          "name": "monitoring_sessions_revision_ck",
+          "value": "\"monitoring_sessions\".\"revision\" > 0"
+        },
+        "monitoring_sessions_time_ck": {
+          "name": "monitoring_sessions_time_ck",
+          "value": "\"monitoring_sessions\".\"opened_at\" <= \"monitoring_sessions\".\"updated_at\" and (\"monitoring_sessions\".\"closed_at\" is null or \"monitoring_sessions\".\"closed_at\" >= \"monitoring_sessions\".\"opened_at\")"
+        },
+        "monitoring_sessions_closed_state_ck": {
+          "name": "monitoring_sessions_closed_state_ck",
+          "value": "(\"monitoring_sessions\".\"status\" = 'in_progress' and \"monitoring_sessions\".\"closed_at\" is null) or (\"monitoring_sessions\".\"status\" in ('completed', 'abandoned') and \"monitoring_sessions\".\"closed_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

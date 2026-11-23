@@ -10,6 +10,8 @@ const questionBase = {
   id: z.string().uuid(),
   prompt: z.string().trim().min(1).max(1000),
   required: z.boolean(),
+  /** Stable position within this immutable instrument version. Legacy rows may omit it and are unavailable for presentation. */
+  displayOrder: z.number().int().min(1).max(200).optional(),
 };
 
 export const instrumentQuestionSchema = z.discriminatedUnion('responseType', [
@@ -41,6 +43,14 @@ export const instrumentVersionSchema = z.object({
   const ids = instrument.questions.map(question => question.id);
   if (new Set(ids).size !== ids.length) {
     context.addIssue({ code: 'custom', path: ['questions'], message: 'Question identifiers must be unique within an instrument version' });
+  }
+  const positions = instrument.questions.map(question => question.displayOrder);
+  const hasPositions = positions.some(position => position !== undefined);
+  if (hasPositions && (
+    positions.some(position => position === undefined) || new Set(positions).size !== positions.length ||
+    Array.from({ length: positions.length }, (_, index) => index + 1).some(position => !positions.includes(position))
+  )) {
+    context.addIssue({ code: 'custom', path: ['questions'], message: 'Question display positions must be unique and contiguous within an instrument version' });
   }
   for (const question of instrument.questions) {
     if ('options' in question) {
@@ -78,7 +88,11 @@ export function parseInstrumentVersion(value: unknown): InstrumentVersion {
 }
 
 export function isInstrumentAvailable(instrument: InstrumentVersion): boolean {
-  return instrument.status === 'approved' && instrument.approval.status === 'approved' &&
+  const positions = instrument.questions.map(question => question.displayOrder);
+  const ordered = positions.every(position => position !== undefined) &&
+    new Set(positions).size === positions.length &&
+    Array.from({ length: positions.length }, (_, index) => index + 1).every(position => positions.includes(position));
+  return ordered && instrument.status === 'approved' && instrument.approval.status === 'approved' &&
     instrument.approval.approvedAt !== null && instrument.approval.approvalReference !== null &&
     (instrument.license.status === 'authorized' || instrument.license.status === 'not_applicable') &&
     instrument.questions.length > 0;

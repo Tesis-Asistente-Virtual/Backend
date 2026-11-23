@@ -3,9 +3,9 @@ import express, { Router } from 'express';
 import { createServer } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, lte } from 'drizzle-orm';
-import { connectTestDatabase } from './test-database.js';
 import { connectDemoDatabase } from '../../scripts/demo-database.js';
 import { conversationalDemoNotices } from './conversational-demo-notices.js';
+import { isConversationalDemoHttpTestEnabled } from './conversational-demo-test-mode.js';
 import { authAccounts } from '../../src/modules/authentication/infrastructure/persistence/schema.js';
 import { SignUp } from '../../src/modules/authentication/application/internal/command-services/sign-up.js';
 import { SignIn } from '../../src/modules/authentication/application/internal/command-services/sign-in.js';
@@ -42,18 +42,18 @@ import type { ConversationSignalExtraction } from '../../src/modules/conversatio
 import { ExtractAuthorizedConversationSignals } from '../../src/modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
 import { createConversationSignalExtractionRouter } from '../../src/modules/conversational-processing/interfaces/rest/conversation-signal-extraction-routes.js';
 
-type TestConnection = Awaited<ReturnType<typeof connectTestDatabase>> | Awaited<ReturnType<typeof connectDemoDatabase>>;
+const demoHttpTestEnabled = isConversationalDemoHttpTestEnabled();
+const demoDescribe = demoHttpTestEnabled ? describe : describe.skip;
 
-describe('isolated conversational demo HTTP + PostgreSQL', () => {
-  let connection: TestConnection;
+demoDescribe('isolated conversational demo HTTP + PostgreSQL', () => {
+  let connection: Awaited<ReturnType<typeof connectDemoDatabase>>;
   const createdAccountIds = new Set<string>();
+  const requiredNotices = conversationalDemoNotices;
 
   beforeAll(async () => {
-    connection = process.env.DEMO_HTTP_TEST_MODE === 'true'
-      ? await connectDemoDatabase()
-      : await connectTestDatabase();
+    connection = await connectDemoDatabase();
     const now = new Date();
-    for (const fixture of conversationalDemoNotices) {
+    for (const fixture of requiredNotices) {
       const [available] = await connection.db.select({ id: consentNoticeVersions.id })
         .from(consentNoticeVersions)
         .where(and(
@@ -190,7 +190,7 @@ describe('isolated conversational demo HTTP + PostgreSQL', () => {
       const noticesResponse = await fetch(`${baseUrl}/api/v1/consents/notices`);
       expect(noticesResponse.status).toBe(200);
       const notices = await noticesResponse.json() as Array<{ id: string; purpose: string; version: string; content: string }>;
-      for (const fixture of conversationalDemoNotices) {
+      for (const fixture of requiredNotices) {
         const notice = notices.find(item => item.purpose === fixture.purpose && item.version === fixture.version);
         expect(notice).toBeDefined();
         expect(notice?.content).toContain('SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS.');
@@ -209,7 +209,7 @@ describe('isolated conversational demo HTTP + PostgreSQL', () => {
       expect(session.tokenType).toBe('Bearer');
       const token = session.accessToken;
 
-      for (const fixture of conversationalDemoNotices) {
+      for (const fixture of requiredNotices) {
         const notice = notices.find(item => item.purpose === fixture.purpose && item.version === fixture.version)!;
         const decision = await post('/api/v1/consents/me/decisions', {
           purpose: fixture.purpose,
@@ -223,7 +223,7 @@ describe('isolated conversational demo HTTP + PostgreSQL', () => {
       const statusResponse = await fetch(`${baseUrl}/api/v1/consents/me`, { headers: { authorization: `Bearer ${token}` } });
       expect(statusResponse.status).toBe(200);
       const status = await statusResponse.json() as { items: Array<{ purpose: string; state: string }> };
-      for (const fixture of conversationalDemoNotices) {
+      for (const fixture of requiredNotices) {
         expect(status.items.find(item => item.purpose === fixture.purpose)?.state).toBe('granted');
       }
 
@@ -298,7 +298,7 @@ describe('isolated conversational demo HTTP + PostgreSQL', () => {
 
       console.info('Synthetic conversational demo passed:', JSON.stringify({
         auth: 'signed_up_and_signed_in',
-        consentPurposes: conversationalDemoNotices.map(item => item.purpose),
+        consentPurposes: requiredNotices.map(item => item.purpose),
         conversationMessages: messagesAfterAnalysis.length,
         extractionObservations: extraction.observations.length,
         resultStatus: result.summary.descriptiveStatus,

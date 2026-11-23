@@ -55,7 +55,10 @@ export class DrizzleAssessmentResponseRepository implements AssessmentResponseRe
         version: instrumentRow.version,
         effectiveAt: instrumentRow.effectiveAt,
         status: instrumentRow.status,
-        questions: questionRows.map(question => question.definition),
+        questions: questionRows.map(question => ({
+          ...(typeof question.definition === 'object' && question.definition !== null ? question.definition : {}),
+          ...(question.displayOrder === null ? {} : { displayOrder: question.displayOrder }),
+        })),
         approval: { status: instrumentRow.approvalStatus, approvedAt: instrumentRow.approvedAt, approvalReference: instrumentRow.approvalReference },
         license: { status: instrumentRow.licenseStatus, reference: instrumentRow.licenseReference },
       });

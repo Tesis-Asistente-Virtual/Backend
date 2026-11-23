@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { conversationSignalExtractionSchema, type ConversationSignalExtraction } from '../../domain/model/signal-observation.js';
 import { createConversationSignalResult, conversationSignalResultSchema } from '../../domain/model/conversation-signal-result.js';
+import { createPreliminaryConversationGuidance, preliminaryConversationGuidanceSchema } from '../../domain/model/preliminary-conversation-guidance.js';
 import { SignalExtractionUnavailable } from '../../application/internal/command-services/extract-authorized-conversation-signals.js';
 import { signalExtractorVersion } from '../../application/signal-extraction-instructions.js';
 import { conversationIdParamsSchema } from '../../../conversations/interfaces/rest/validation/conversation-request-schemas.js';
@@ -21,6 +22,7 @@ export const extractConversationSignalsResponseSchema = conversationSignalExtrac
 
 export const generateConversationSignalResultResponseSchema = conversationSignalResultSchema.omit({ accountId: true }).extend({
   status: z.literal('completed'),
+  preliminaryGuidance: preliminaryConversationGuidanceSchema,
 }).strict();
 
 export class ConversationSignalExtractionController {
@@ -44,8 +46,9 @@ export class ConversationSignalExtractionController {
       sourceMessageIds: completed.messageIds,
       extraction: completed.extraction,
     });
+    const preliminaryGuidance = createPreliminaryConversationGuidance(transientResult);
     const { accountId: _ownerAccountId, ...publicResult } = transientResult;
-    res.status(200).json(generateConversationSignalResultResponseSchema.parse({ status: 'completed', ...publicResult }));
+    res.status(200).json(generateConversationSignalResultResponseSchema.parse({ status: 'completed', ...publicResult, preliminaryGuidance }));
   }
 
   private async extract(req: Request, res: Response): Promise<{

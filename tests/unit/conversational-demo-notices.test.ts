@@ -6,13 +6,14 @@ import {
   ensureConversationalDemoNotices,
   inspectDemoNoticeFixture,
   toSafeDemoNoticeDiagnostic,
+  type DemoConsentPurpose,
   type DemoNoticeStore,
   type DemoNoticeTransaction,
 } from '../integration/conversational-demo-notices.js';
 
 type Notice = {
   id: string;
-  purpose: 'ai_conversation_processing' | 'structured_signal_extraction';
+  purpose: DemoConsentPurpose;
   version: string;
   content: string;
   contentHash: string;
@@ -64,8 +65,8 @@ describe('synthetic conversational consent notice seeder', () => {
   it('inserts and publishes both valid synthetic fixtures transactionally', async () => {
     const mock = mockStore();
     const ids = await ensureConversationalDemoNotices(mock.store, fixedNow);
-    expect(Object.keys(ids)).toHaveLength(2);
-    expect(mock.rows()).toHaveLength(2);
+    expect(Object.keys(ids)).toHaveLength(4);
+    expect(mock.rows()).toHaveLength(4);
     expect(mock.rows().every(row => row.status === 'published' && row.effectiveAt < fixedNow())).toBe(true);
   });
 
@@ -106,7 +107,7 @@ describe('synthetic conversational consent notice seeder', () => {
     const second = await ensureConversationalDemoNotices(mock.store, fixedNow);
     expect(second).toEqual(first);
     expect(mock.counts()).toEqual(firstCounts);
-    expect(mock.rows()).toHaveLength(2);
+    expect(mock.rows()).toHaveLength(4);
   });
 
   it('classifies a PostgreSQL constraint failure and rolls back all synthetic inserts', async () => {
@@ -130,8 +131,21 @@ describe('synthetic conversational consent notice seeder', () => {
   });
 
   it('keeps the fixtures explicitly synthetic and restricted to the demo purposes', () => {
-    expect(conversationalDemoNotices).toHaveLength(2);
-    expect(conversationalDemoNotices.every(notice => notice.content.includes('NO APROBACIÓN LEGAL'))).toBe(true);
+    expect(conversationalDemoNotices.map(notice => notice.purpose)).toEqual([
+      'ai_conversation_processing',
+      'structured_signal_extraction',
+      'preliminary_assessment',
+      'longitudinal_monitoring',
+    ]);
+    expect(conversationalDemoNotices.map(notice => notice.version)).toEqual([
+      'demo-4c3-ai-v1',
+      'demo-4c3-signals-v1',
+      'demo-5a1-assessment-v1',
+      'demo-5a1-monitoring-v1',
+    ]);
+    expect(conversationalDemoNotices.every(notice => notice.content.includes('SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS.'))).toBe(true);
+    expect(conversationalDemoNotices[0]?.content).toBe('SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS. Aviso técnico sintético para demostrar procesamiento conversacional solamente en tesis_test_db. No es un aviso jurídico, no autoriza el uso con estudiantes reales y no se deben ingresar datos reales.');
+    expect(conversationalDemoNotices[1]?.content).toBe('SOLO DEMOSTRACIÓN / NO APROBACIÓN LEGAL / DATOS FICTICIOS. Aviso técnico sintético para demostrar extracción estructurada solamente en tesis_test_db. No es un aviso jurídico, no autoriza el uso con estudiantes reales y no se deben ingresar datos reales.');
   });
 
   it('distinguishes incompatible published notices, duplicate versions, and draft conflicts without exposing IDs', () => {

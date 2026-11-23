@@ -20,9 +20,13 @@ La respuesta de extracción 200 mantiene el contrato estructurado versionado `1.
 
 ## Resultado descriptivo efímero
 
-`POST /api/v1/conversations/:id/signals/results` solicita explícitamente la misma extracción autorizada y devuelve un resultado descriptivo versionado directamente en esa respuesta. Conserva los campos de observación, agrega un ID efímero, fecha de generación, versión del extractor (`1.0.0`), referencias fuente y un resumen determinista construido solo con evidencia `reported`. El `accountId` se usa para propiedad interna y no se devuelve al cliente.
+`POST /api/v1/conversations/:id/signals/results` solicita explícitamente la misma extracción autorizada y devuelve un resultado descriptivo versionado directamente en esa respuesta. Conserva los campos existentes, agrega un ID efímero, fecha de generación, versión del extractor (`1.0.0`), referencias fuente y un resumen determinista construido solo con evidencia `reported`. Ahora incluye el campo aditivo `preliminaryGuidance` (`contractVersion: "1.0"`), derivado sin una segunda llamada al modelo: observaciones claras copiadas de hechos reportados con referencias, brechas, preguntas opcionales, orientación general fija y límites. `accountId` se usa para propiedad interna y no se devuelve al cliente.
 
 El resumen separa hechos reportados, información faltante y preguntas pendientes. `no_observations` significa solamente que no se generaron observaciones para los mensajes seleccionados; nunca significa ausencia de síntomas ni de riesgo. El resultado incluye límites explícitos: descriptivo, no diagnóstico, sin cálculo de severidad clínica y sin evaluación de seguridad.
+
+`preliminaryGuidance.observations` no reescribe el texto extraído: cada elemento identifica el índice de observación original, el campo, el texto marcado como `reported` y los mensajes fuente. `informationGaps` y `suggestedFollowUpQuestions` reutilizan los datos ya validados. La orientación general solo invita a revisar o corregir el resumen y a compartir información de forma opcional; no prescribe atención individual ni activa derivaciones. Las propiedades del contrato son estrictas y rechazan diagnósticos, confianza y puntuaciones. La redacción fija debe revisarse profesionalmente antes de presentarse a estudiantes en un piloto.
+
+El inventario y la matriz de revisión de los cinco textos fijos están en [`docs/sprint-5c3-guidance-review.md`](../../../docs/sprint-5c3-guidance-review.md). Su estado es pendiente de revisión profesional, ética y jurídica; no representa aprobación.
 
 No hay persistencia ni caché en memoria, y por eso no existe un endpoint GET por ID. El frontend recibe el resultado completo para presentarlo inmediatamente; el ID solo identifica esa respuesta transitoria. El endpoint existente `/signals/extract` conserva su contrato sin los nuevos campos.
 

@@ -15,7 +15,10 @@ import { SubmitAssessmentResponse } from '../../../src/modules/preliminary-asses
 import { ChangeAssessmentState } from '../../../src/modules/preliminary-assessment/application/internal/command-services/change-assessment-state.js';
 import { CompletePreliminaryAssessment } from '../../../src/modules/preliminary-assessment/application/internal/command-services/complete-preliminary-assessment.js';
 import { GetMyAssessment } from '../../../src/modules/preliminary-assessment/application/internal/query-services/get-my-assessment.js';
+import { GetMyAssessmentForm } from '../../../src/modules/preliminary-assessment/application/internal/query-services/get-my-assessment-form.js';
+import { ListMyAssessments } from '../../../src/modules/preliminary-assessment/application/internal/query-services/list-my-assessments.js';
 import { GetMyAssessmentResult } from '../../../src/modules/preliminary-assessment/application/internal/query-services/get-my-assessment-result.js';
+import { ReauthorizeAssessment } from '../../../src/modules/preliminary-assessment/application/internal/command-services/reauthorize-assessment.js';
 import { assessmentIdParamsSchema, assessmentPaginationSchema, startAssessmentBodySchema, submitAssessmentResponseBodySchema } from '../../../src/modules/preliminary-assessment/interfaces/rest/validation/assessment-request-schemas.js';
 import { errorHandler } from '../../../src/shared/infrastructure/http/error-handler.js';
 import type { Request, Response } from 'express';
@@ -28,11 +31,13 @@ const questionId = '550e8400-e29b-41d4-a716-446655440004';
 const at = new Date('2026-05-01T12:00:00.000Z');
 
 function instrument(overrides: Partial<InstrumentVersion> = {}): InstrumentVersion {
+  const questions = (overrides.questions ?? [{ id: questionId, prompt: 'Synthetic neutral prompt', responseType: 'text' as const, required: true, maxLength: 200 }])
+    .map((question, index) => ({ ...question, displayOrder: question.displayOrder ?? index + 1 }));
   return parseInstrumentVersion({
     instrumentId: randomUUID(), instrumentVersionId: versionId, version: 'synthetic-1', effectiveAt: new Date('2026-01-01T00:00:00Z'), status: 'approved',
-    questions: [{ id: questionId, prompt: 'Synthetic neutral prompt', responseType: 'text', required: true, maxLength: 200 }],
+    questions,
     approval: { status: 'approved', approvedAt: at, approvalReference: 'test-only approval' },
-    license: { status: 'authorized', reference: 'test-only license' }, ...overrides,
+    license: { status: 'authorized', reference: 'test-only license' }, ...overrides, questions,
   });
 }
 
@@ -121,6 +126,75 @@ describe('PreliminaryAssessment application and REST validation', () => {
       .execute(assessmentId, ownerId, questionId, { type: 'text', value: 'Synthetic answer' }))
       .rejects.toMatchObject({ code: 'consent_required' });
     expect(inProgressWithoutConsent.responses.saveForOwner).not.toHaveBeenCalled();
+  });
+
+  it('returns only the owner’s ordered pinned form and fails closed on stale consent or closed state', async () => {
+    const orderedInstrument = instrument({ questions: [
+      { id: randomUUID(), prompt: 'Synthetic second item', responseType: 'boolean', required: true, displayOrder: 2 },
+      { id: questionId, prompt: 'Synthetic first item', responseType: 'boolean', required: true, displayOrder: 1 },
+    ] });
+    const h = harness({ selectedInstrument: orderedInstrument });
+    const query = new GetMyAssessmentForm(h.assessments, h.instruments, h.consent, () => at);
+    const form = await query.execute(assessmentId, ownerId);
+    expect(form.instrument.instrumentVersionId).toBe(versionId);
+    expect(form.instrument.questions.map(question => question.displayOrder)).toEqual([1, 2]);
+    expect(form.assessment.responses).toEqual([]);
+    await expect(query.execute(assessmentId, randomUUID())).rejects.toMatchObject({ code: 'assessment_not_found' });
+
+    const stale = harness({ consentId: randomUUID() });
+    await expect(new GetMyAssessmentForm(stale.assessments, stale.instruments, stale.consent, () => at).execute(assessmentId, ownerId))
+      .rejects.toMatchObject({ code: 'consent_required' });
+    expect(stale.instruments.findAvailableByVersionId).not.toHaveBeenCalled();
+
+    const completed = harness({ assessment: aggregate('completed') });
+    await expect(new GetMyAssessmentForm(completed.assessments, completed.instruments, completed.consent, () => at).execute(assessmentId, ownerId))
+      .rejects.toMatchObject({ code: 'assessment_closed' });
+  });
+
+  it('does not include saved answer payloads in the owner list when open-assessment consent is stale or unavailable', async () => {
+    const response = {
+      assessmentId, instrumentVersionId: versionId, questionId, status: 'answered' as const,
+      answer: { type: 'text' as const, value: 'Synthetic private answer' }, createdAt: at, updatedAt: at,
+    };
+    const assessment = { ...aggregate(), responses: [response] };
+    const stale = harness({ consentId: randomUUID() });
+    vi.mocked(stale.assessments.listByOwner).mockResolvedValueOnce([assessment]);
+    const staleItems = await new ListMyAssessments(stale.assessments, stale.consent).execute(ownerId, 10, 0);
+    expect(staleItems[0]?.responses).toEqual([]);
+
+    const unavailable = harness();
+    vi.mocked(unavailable.assessments.listByOwner).mockResolvedValueOnce([assessment]);
+    vi.mocked(unavailable.consent.getCurrentNoticeVersionId).mockRejectedValueOnce(new Error('synthetic checker outage'));
+    const unavailableItems = await new ListMyAssessments(unavailable.assessments, unavailable.consent).execute(ownerId, 10, 0);
+    expect(unavailableItems[0]?.responses).toEqual([]);
+
+    const authorized = harness();
+    vi.mocked(authorized.assessments.listByOwner).mockResolvedValueOnce([assessment]);
+    const authorizedItems = await new ListMyAssessments(authorized.assessments, authorized.consent).execute(ownerId, 10, 0);
+    expect(authorizedItems[0]?.responses).toEqual([response]);
+  });
+
+  it('reauthorizes only open assessments after a current explicit grant and preserves progress', async () => {
+    const newNotice = randomUUID();
+    const h = harness({ consentId: newNotice, assessment: aggregate('paused') });
+    const updated = await new ReauthorizeAssessment(h.assessments, h.consent, () => at).execute(assessmentId, ownerId);
+    expect(updated).toMatchObject({ status: 'paused', consentNoticeVersionId: newNotice, instrumentVersionId: versionId });
+    expect(h.saved).toHaveBeenCalledWith(updated, ownerId, h.currentAssessment?.updatedAt);
+
+    const repeat = harness({ consentId: noticeId, assessment: aggregate() });
+    await new ReauthorizeAssessment(repeat.assessments, repeat.consent, () => at).execute(assessmentId, ownerId);
+    expect(repeat.saved).not.toHaveBeenCalled();
+
+    const withdrawn = harness({ consentId: newNotice, assessment: { ...aggregate(), status: 'withdrawn' as const, withdrawnAt: at } });
+    await expect(new ReauthorizeAssessment(withdrawn.assessments, withdrawn.consent, () => at).execute(assessmentId, ownerId))
+      .rejects.toMatchObject({ code: 'assessment_closed' });
+    expect(withdrawn.saved).not.toHaveBeenCalled();
+
+    const checkerFailure = harness({ consentId: newNotice });
+    vi.mocked(checkerFailure.consent.getCurrentNoticeVersionId).mockRejectedValueOnce(new Error('synthetic authorization failure'));
+    await expect(new ReauthorizeAssessment(checkerFailure.assessments, checkerFailure.consent, () => at).execute(assessmentId, ownerId))
+      .rejects.toThrow('synthetic authorization failure');
+    expect(checkerFailure.saved).not.toHaveBeenCalled();
   });
 
   it('preserves the transactional consent denial for resume and completion without reporting writes as successful', async () => {

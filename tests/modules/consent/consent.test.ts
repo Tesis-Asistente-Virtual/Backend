@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ConsentAction, ConsentStatus } from '../../../src/modules/consent/domain/model/consent.js';
+import { consentPurposes, type ConsentAction, type ConsentStatus } from '../../../src/modules/consent/domain/model/consent.js';
 import type { ConsentRepository } from '../../../src/modules/consent/domain/repositories/consent-repository.js';
 import { CheckConsentForPurpose } from '../../../src/modules/consent/application/internal/query-services/check-consent-for-purpose.js';
 import { GetMyConsentStatus } from '../../../src/modules/consent/application/internal/query-services/get-my-consent-status.js';
@@ -16,6 +16,19 @@ function repository(status: ConsentStatus[]): ConsentRepository {
 }
 
 describe('Consent & Privacy', () => {
+  it('keeps the four independent purposes supported by the notice and decision contracts', () => {
+    expect(consentPurposes).toEqual([
+      'ai_conversation_processing',
+      'structured_signal_extraction',
+      'longitudinal_monitoring',
+      'preliminary_assessment',
+    ]);
+    const base = { noticeVersionId: '5226778f-3001-4f4a-8f80-2a8a3d409a78', action: 'granted', idempotencyKey: 'fc2e1de5-7916-4f47-bc87-80759bc22e2a' };
+    for (const purpose of consentPurposes) {
+      expect(consentDecisionSchema.parse({ ...base, purpose }).purpose).toBe(purpose);
+    }
+  });
+
   it('denies when no explicit current grant exists and isolates by purpose', async () => {
     const repo = repository([
       { purpose: 'ai_conversation_processing', state: 'not_decided', currentNoticeVersion: null, changedAt: null },
@@ -31,6 +44,12 @@ describe('Consent & Privacy', () => {
     const repo = repository([{ purpose: 'preliminary_assessment', state: 'renewal_required', currentNoticeVersion: '2.0', changedAt: new Date() }]);
     await expect(new CheckConsentForPurpose(repo).execute(accountId, 'preliminary_assessment')).resolves.toBe(false);
     await expect(new GetMyConsentStatus(repo).execute(accountId)).resolves.toMatchObject([{ state: 'renewal_required' }]);
+  });
+
+  it.each(['not_decided', 'declined', 'withdrawn', 'renewal_required'] as const)('fails closed for %s status', async state => {
+    const repo = repository([{ purpose: 'longitudinal_monitoring', state, currentNoticeVersion: '1.0', changedAt: new Date() }]);
+    await expect(new CheckConsentForPurpose(repo).execute(accountId, 'longitudinal_monitoring')).resolves.toBe(false);
+    expect(repo.getStatus).toHaveBeenCalledWith(accountId, expect.any(Date));
   });
 
   it('validates explicit action, purpose, notice and idempotency key strictly', () => {

@@ -18,10 +18,12 @@ import { errorHandler } from '../../src/shared/infrastructure/http/error-handler
 import { JwtAccessTokenService } from '../../src/modules/authentication/infrastructure/security/jwt-access-token-service.js';
 import { authAccounts } from '../../src/modules/authentication/infrastructure/persistence/schema.js';
 import { connectTestDatabase } from './test-database.js';
+import { acquirePreliminaryAssessmentNoticeLock } from './preliminary-assessment-notice-lock.js';
 
 const testJwt = new JwtAccessTokenService('integration-test-only-secret-with-sufficient-entropy', 'consent-integration', 'consent-integration-client', 300);
 describe('Consent & Privacy PostgreSQL integration', () => {
   let pool: Pool;
+  let noticeLock: Awaited<ReturnType<typeof acquirePreliminaryAssessmentNoticeLock>> | undefined;
   let db: Awaited<ReturnType<typeof connectTestDatabase>>['db'];
   let server: Server;
   let baseUrl: string;
@@ -70,6 +72,7 @@ describe('Consent & Privacy PostgreSQL integration', () => {
     // This is the only database connection path used by this suite. It rejects every target
     // except a locally verified tesis_test_db and never falls back to DATABASE_URL.
     ({ pool, db } = await connectTestDatabase());
+    noticeLock = await acquirePreliminaryAssessmentNoticeLock(pool);
     const repo = repository();
     const controller = new ConsentController(
       new ListAvailableConsentNotices(repo), new GetMyConsentStatus(repo), new RecordMyConsentDecision(repo),
@@ -100,6 +103,7 @@ describe('Consent & Privacy PostgreSQL integration', () => {
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await noticeLock?.release();
     await pool?.end();
   });
 

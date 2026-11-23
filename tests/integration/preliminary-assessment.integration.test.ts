@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, lte } from 'drizzle-orm';
+import type { PoolClient } from 'pg';
 import { authAccounts } from '../../src/modules/authentication/infrastructure/persistence/schema.js';
 import { accountConsentEvents, consentNoticeVersions } from '../../src/modules/consent/infrastructure/persistence/schema.js';
 import { DrizzleConsentRepository } from '../../src/modules/consent/infrastructure/persistence/drizzle-consent-repository.js';
@@ -23,12 +24,13 @@ import { errorHandler } from '../../src/shared/infrastructure/http/error-handler
 import { ChangeAssessmentState } from '../../src/modules/preliminary-assessment/application/internal/command-services/change-assessment-state.js';
 import { CompletePreliminaryAssessment } from '../../src/modules/preliminary-assessment/application/internal/command-services/complete-preliminary-assessment.js';
 import type { PreliminaryAssessmentConsentAuthorizer } from '../../src/modules/preliminary-assessment/application/ports/preliminary-assessment-consent-authorizer.js';
+import { acquirePreliminaryAssessmentNoticeLock } from './preliminary-assessment-notice-lock.js';
 
 type TestDb = Awaited<ReturnType<typeof connectTestDatabase>>['db'];
 const fixtureInstrumentId = '00000000-0000-4000-8000-00000000a531';
 const fixtureQuestions = [
-  { id: '00000000-0000-4000-8000-00000000a533', prompt: 'Synthetic neutral integration question.', responseType: 'text' as const, required: true, maxLength: 200 },
-  { id: '00000000-0000-4000-8000-00000000a535', prompt: 'Synthetic optional integration question.', responseType: 'boolean' as const, required: false },
+  { id: '00000000-0000-4000-8000-00000000a533', prompt: 'Synthetic neutral integration question.', responseType: 'text' as const, required: true, maxLength: 200, displayOrder: 1 },
+  { id: '00000000-0000-4000-8000-00000000a535', prompt: 'Synthetic optional integration question.', responseType: 'boolean' as const, required: false, displayOrder: 2 },
 ];
 const testJwt = new JwtAccessTokenService('preliminary-assessment-integration-only-secret-with-sufficient-entropy', 'assessment-integration', 'assessment-test-client', 300);
 
@@ -52,6 +54,7 @@ async function expectPostgresCode(operation: Promise<unknown>, expectedCode: str
 describe('PreliminaryAssessment PostgreSQL integration', () => {
   let pool: Awaited<ReturnType<typeof connectTestDatabase>>['pool'];
   let db: TestDb;
+  let noticeLock: Awaited<ReturnType<typeof acquirePreliminaryAssessmentNoticeLock>> | undefined;
   let server: Server | undefined;
   let baseUrl: string;
   const accountIds = new Set<string>();
@@ -113,7 +116,9 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
   async function waitForBlockedQuery(fragment: string): Promise<void> {
     const deadline = Date.now() + 5_000;
     while (Date.now() < deadline) {
-      const result = await pool.query<{ pid: number }>(
+      const observer = noticeLock?.observer;
+      if (!observer) throw new Error('Preliminary notice advisory lock is not held');
+      const result = await observer.query<{ pid: number }>(
         `SELECT pid FROM pg_stat_activity
          WHERE datname = current_database() AND pid <> pg_backend_pid()
            AND wait_event_type = 'Lock' AND query ILIKE $1
@@ -134,13 +139,6 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     const repository = new DrizzlePreliminaryAssessmentRepository(db);
     const authorizer = consentAuthorizer(noticeId);
     if (operation === 'resume') {
-      const current = await repository.findByIdForOwner(assessmentId, ownerId);
-      if (!current) throw new Error('Synthetic assessment fixture missing');
-      if (current.status === 'in_progress') {
-        const paused = pauseAssessment(current, new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)));
-        const saved = await repository.saveForOwner(paused, ownerId, current.updatedAt);
-        if (!saved) throw new Error('Could not pause synthetic assessment fixture');
-      }
       return new ChangeAssessmentState(repository, authorizer).execute(assessmentId, ownerId, 'resume');
     }
     if (operation === 'response') {
@@ -173,12 +171,9 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
   }
 
   async function instrument(versionNumber: 1 | 2 = 1): Promise<InstrumentVersion> {
-    const versionId = versionNumber === 1 ? '00000000-0000-4000-8000-00000000a532' : '00000000-0000-4000-8000-00000000a534';
-    const version = `integration-v${versionNumber}`;
+    const versionId = randomUUID();
+    const version = `it-${versionNumber}-${randomUUID().slice(0, 12)}`;
     const catalog = new DrizzleInstrumentCatalog(db);
-    const existing = await catalog.findVersion(fixtureInstrumentId, versionId);
-    if (existing?.status === 'approved') return existing;
-    if (existing?.status === 'retired') throw new Error('Synthetic integration instrument fixture has been retired');
     const draft: NewInstrumentDraft = {
       instrumentId: fixtureInstrumentId,
       instrumentVersionId: versionId,
@@ -189,11 +184,8 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
       approval: { status: 'pending', approvedAt: null, approvalReference: null },
       license: { status: 'not_reviewed', reference: null },
     };
-    if (existing) await catalog.updateDraft(draft);
-    else {
-      await catalog.createDraft(draft);
-      instrumentIds.add(versionId);
-    }
+    await catalog.createDraft(draft);
+    instrumentIds.add(versionId);
     const published = await catalog.publishVersion(versionId, {
       approval: { status: 'approved', approvedAt: new Date(), approvalReference: 'integration-test-only-approval' },
       license: { status: 'not_applicable', reference: 'synthetic fixture only' },
@@ -214,7 +206,7 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
       version: `it-${randomUUID().slice(0, 16)}`,
       effectiveAt: new Date(Date.now() - 60_000),
       status: 'draft',
-      questions: [{ id: questionId, prompt: 'Synthetic isolated integration question.', responseType: 'text', required: true, maxLength: 200 }],
+      questions: [{ id: questionId, prompt: 'Synthetic isolated integration question.', responseType: 'text', required: true, maxLength: 200, displayOrder: 1 }],
       approval: { status: 'pending', approvedAt: null, approvalReference: null },
       license: { status: 'not_reviewed', reference: null },
     };
@@ -252,6 +244,7 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
   beforeAll(async () => {
     // This guarded helper is the only connection path; it accepts only local tesis_test_db.
     ({ pool, db } = await connectTestDatabase());
+    noticeLock = await acquirePreliminaryAssessmentNoticeLock(pool);
     const app = express();
     app.use(express.json());
     app.use('/api/v1/preliminary-assessments', createPreliminaryAssessmentRouter(db, testJwt));
@@ -278,6 +271,7 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
 
   afterAll(async () => {
     if (server?.listening) await new Promise<void>((resolve, reject) => server?.close(error => error ? reject(error) : resolve()));
+    await noticeLock?.release();
     await pool?.end();
   });
 
@@ -373,7 +367,15 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
       const ownerId = await account();
       const oldNoticeId = await grantConsent(ownerId);
       const selected = operation === 'response' ? await instrument() : undefined;
-      const assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      let assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      if (operation === 'resume') {
+        const current = await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId);
+        if (!current) throw new Error('Synthetic assessment fixture missing');
+        const paused = pauseAssessment(current, new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)));
+        expect(await new DrizzlePreliminaryAssessmentRepository(db).saveForOwner(paused, ownerId, current.updatedAt)).toBe(true);
+        assessment = paused;
+        expect((await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId))?.status).toBe('paused');
+      }
       await supersedeNotice(oldNoticeId);
 
       await expect(executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId))
@@ -391,9 +393,18 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
       const ownerId = await account();
       const oldNoticeId = await grantConsent(ownerId);
       const selected = operation === 'response' ? await instrument() : undefined;
-      const assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      let assessment = await createAssessment(ownerId, oldNoticeId, selected);
+      if (operation === 'resume') {
+        const current = await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId);
+        if (!current) throw new Error('Synthetic assessment fixture missing');
+        const paused = pauseAssessment(current, new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1)));
+        expect(await new DrizzlePreliminaryAssessmentRepository(db).saveForOwner(paused, ownerId, current.updatedAt)).toBe(true);
+        assessment = paused;
+        expect((await new DrizzlePreliminaryAssessmentRepository(db).findByIdForOwner(assessment.assessmentId, ownerId))?.status).toBe('paused');
+      }
       const publisher = await pool.connect();
       let publisherTransaction = false;
+      let pendingWriteOutcome: Promise<unknown> | undefined;
       try {
         await publisher.query('BEGIN');
         publisherTransaction = true;
@@ -401,6 +412,7 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
 
         const pendingWrite = executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId);
         const outcome = pendingWrite.then(() => null, error => error as unknown);
+        pendingWriteOutcome = outcome;
         await waitForBlockedQuery('consent_notice_versions');
 
         const replacementId = await insertDraftNotice();
@@ -416,8 +428,15 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
         expect(await db.select().from(assessmentResults).where(eq(assessmentResults.assessmentId, assessment.assessmentId))).toHaveLength(0);
         expect(await db.select().from(assessmentAnswers).where(eq(assessmentAnswers.assessmentId, assessment.assessmentId))).toHaveLength(0);
       } finally {
-        if (publisherTransaction) await publisher.query('ROLLBACK');
-        publisher.release();
+        try {
+          if (publisherTransaction) {
+            await publisher.query('ROLLBACK');
+            publisherTransaction = false;
+          }
+        } finally {
+          publisher.release(publisherTransaction);
+          await pendingWriteOutcome;
+        }
       }
     },
   );
@@ -437,31 +456,38 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
         expect(await repository.saveForOwner(paused, ownerId, current.updatedAt)).toBe(true);
       }
 
+      // Prepare the immutable replacement as a tracked draft before reserving the
+      // blocker, publisher, and pending-write connections. Publication still runs
+      // concurrently and must wait on the notice lock held by the protected write.
+      const replacementId = await insertDraftNotice();
       const assessmentBlocker = await pool.connect();
-      const publisher = await pool.connect();
+      let publisher: PoolClient | undefined;
       let blockerActive = false;
       let publisherActive = false;
-      let replacementId: string | undefined;
+      let pendingWriteOutcome: Promise<unknown> | undefined;
+      let publisherOutcome: Promise<unknown> | undefined;
       try {
+        publisher = await pool.connect();
+        const publisherClient = publisher;
         await assessmentBlocker.query('BEGIN');
         blockerActive = true;
         await assessmentBlocker.query('SELECT assessment_id FROM preliminary_assessments WHERE assessment_id = $1::uuid FOR UPDATE', [assessment.assessmentId]);
 
         const pendingWrite = executeProtectedWrite(operation, ownerId, assessment.assessmentId, oldNoticeId);
         const outcome = pendingWrite.then(() => null, error => error as unknown);
+        pendingWriteOutcome = outcome;
         await waitForBlockedQuery('preliminary_assessments');
 
-        await publisher.query('BEGIN');
+        await publisherClient.query('BEGIN');
         publisherActive = true;
-        replacementId = await insertDraftNotice();
         const publisherWrite = (async () => {
-          await publisher.query("UPDATE consent_notice_versions SET status = 'superseded' WHERE id = $1::uuid", [oldNoticeId]);
-          await publisher.query("UPDATE consent_notice_versions SET status = 'published' WHERE id = $1::uuid", [replacementId]);
-          await publisher.query('COMMIT');
+          await publisherClient.query("UPDATE consent_notice_versions SET status = 'superseded' WHERE id = $1::uuid", [oldNoticeId]);
+          await publisherClient.query("UPDATE consent_notice_versions SET status = 'published' WHERE id = $1::uuid", [replacementId]);
+          await publisherClient.query('COMMIT');
           publisherActive = false;
           if (replacementId) draftNoticeIds.delete(replacementId);
         })();
-        const publisherOutcome = publisherWrite.then(() => null, error => error as unknown);
+        publisherOutcome = publisherWrite.then(() => null, error => error as unknown);
         await waitForBlockedQuery('consent_notice_versions');
 
         await assessmentBlocker.query('COMMIT');
@@ -476,11 +502,24 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
         expect(await db.select().from(assessmentAnswers).where(eq(assessmentAnswers.assessmentId, assessment.assessmentId)))
           .toHaveLength(operation === 'response' ? 1 : 0);
       } finally {
-        if (blockerActive) await assessmentBlocker.query('ROLLBACK');
-        if (publisherActive) await publisher.query('ROLLBACK');
-        if (replacementId && publisherActive) draftNoticeIds.add(replacementId);
-        assessmentBlocker.release();
-        publisher.release();
+        try {
+          if (blockerActive) {
+            await assessmentBlocker.query('ROLLBACK');
+            blockerActive = false;
+          }
+        } finally {
+          assessmentBlocker.release(blockerActive);
+          try {
+            if (publisherActive && publisher) {
+              await publisher.query('ROLLBACK');
+              publisherActive = false;
+            }
+          } finally {
+            publisher?.release(publisherActive);
+            await pendingWriteOutcome;
+            await publisherOutcome;
+          }
+        }
       }
     },
   );
@@ -492,8 +531,8 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     const secondInstrument = await isolatedInstrument();
     await expectPostgresCode(pool.query(
       `INSERT INTO assessment_instrument_versions (instrument_version_id, instrument_id, version, effective_at)
-       VALUES ($1,$2,'integration-v1',now())`,
-      [randomUUID(), fixtureInstrumentId],
+       VALUES ($1,$2,$3,now())`,
+      [randomUUID(), fixtureInstrumentId, firstInstrument.version],
     ), '23505');
     const assessment = await createAssessment(ownerId, noticeId, firstInstrument);
     const question = firstInstrument.questions[0];
@@ -535,6 +574,10 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     await expectPostgresCode(pool.query('UPDATE assessment_instrument_questions SET definition = $3::jsonb WHERE instrument_version_id = $1 AND question_id = $2', [
       firstInstrument.instrumentVersionId, question.id, JSON.stringify({ ...question, prompt: 'tampered fixture' }),
     ]), '23514');
+    await expectPostgresCode(pool.query(
+      'UPDATE assessment_instrument_questions SET display_order = 2 WHERE instrument_version_id = $1 AND question_id = $2',
+      [firstInstrument.instrumentVersionId, question.id],
+    ), '23514');
   });
 
   it('rejects starting without current explicit consent and cascades only the owned test account data', async () => {
@@ -564,7 +607,7 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     expect(info.status).toBe(200);
     const infoBody = await info.json() as { assessmentAvailable: boolean; instruments: Array<{ instrumentVersionId: string }> };
     expect(infoBody.assessmentAvailable).toBe(true);
-    expect(infoBody.instruments.some(item => item.instrumentVersionId === '00000000-0000-4000-8000-00000000a532')).toBe(true);
+    expect(infoBody.instruments.some(item => item.instrumentVersionId === selected.instrumentVersionId)).toBe(true);
 
     const noticeId = await grantConsent(owner);
     const invalidStart = await request('/api/v1/preliminary-assessments', token, 'POST', { instrumentVersionId: selected.instrumentVersionId, accountId: other });
@@ -601,6 +644,120 @@ describe('PreliminaryAssessment PostgreSQL integration', () => {
     expect((await request('/api/v1/preliminary-assessments?limit=1', token)).status).toBe(200);
     expect(await db.select().from(accountConsentEvents).where(eq(accountConsentEvents.accountId, owner))).toHaveLength(1);
     expect(noticeId).toBeTruthy();
+  });
+
+  it('serves the owner’s exact ordered form and requires an explicit new consent decision before reauthorization', async () => {
+    const owner = await account();
+    const stranger = await account();
+    const token = await testJwt.issue(owner);
+    const strangerToken = await testJwt.issue(stranger);
+    const selected = await instrument(1);
+    const oldNoticeId = await grantConsent(owner);
+    const startedResponse = await request('/api/v1/preliminary-assessments', token, 'POST', {
+      instrumentVersionId: selected.instrumentVersionId,
+    });
+    expect(startedResponse.status).toBe(201);
+    const started = await startedResponse.json() as { id: string; status: string };
+
+    const initialFormResponse = await request(`/api/v1/preliminary-assessments/${started.id}/form`, token);
+    expect(initialFormResponse.status).toBe(200);
+    const initialForm = await initialFormResponse.json() as {
+      assessment: { id: string; status: string; responses: unknown[] };
+      instrument: { instrumentVersionId: string; questions: Array<{ id: string; displayOrder: number }> };
+    };
+    expect(initialForm.instrument.instrumentVersionId).toBe(selected.instrumentVersionId);
+    expect(initialForm.instrument.questions.map(question => question.displayOrder)).toEqual([1, 2]);
+    expect((await request(`/api/v1/preliminary-assessments/${started.id}/form`, strangerToken)).status).toBe(404);
+
+    const question = initialForm.instrument.questions[0];
+    if (!question) throw new Error('Synthetic ordered form question missing');
+    expect((await request(`/api/v1/preliminary-assessments/${started.id}/responses`, token, 'POST', {
+      questionId: question.id, answer: { type: 'text', value: 'Synthetic saved form progress' },
+    })).status).toBe(200);
+
+    const newNoticeId = await supersedeNotice(oldNoticeId);
+    const consentRepository = new DrizzleConsentRepository(db);
+    expect((await request(`/api/v1/preliminary-assessments/${started.id}/form`, token)).status).toBe(403);
+    const newGrant = await consentRepository.recordDecision(
+      owner, 'preliminary_assessment', newNoticeId, 'granted', randomUUID(), new Date(),
+    );
+    expect(newGrant).toBeTruthy();
+    // A new decision alone does not silently rebind an already-open assessment.
+    expect((await request(`/api/v1/preliminary-assessments/${started.id}/form`, token)).status).toBe(403);
+    const staleList = await request('/api/v1/preliminary-assessments', token);
+    const staleListBody = await staleList.json() as { items: Array<{ id: string; responses: unknown[] }> };
+    expect(staleListBody.items.find(item => item.id === started.id)?.responses).toEqual([]);
+    await expectPostgresCode(pool.query(
+      `UPDATE preliminary_assessments SET consent_notice_version_id = $2::uuid, status = 'withdrawn',
+       withdrawn_at = now(), updated_at = now() WHERE assessment_id = $1::uuid`,
+      [started.id, newNoticeId],
+    ), '23514');
+
+    const reauthorizeResponse = await request(`/api/v1/preliminary-assessments/${started.id}/reauthorize`, token, 'POST', {});
+    expect(reauthorizeResponse.status).toBe(200);
+    expect(await reauthorizeResponse.json()).toMatchObject({ id: started.id, status: 'in_progress' });
+
+    const resumedFormResponse = await request(`/api/v1/preliminary-assessments/${started.id}/form`, token);
+    expect(resumedFormResponse.status).toBe(200);
+    const resumedForm = await resumedFormResponse.json() as {
+      assessment: { id: string; status: string; responses: Array<{ questionId: string; answer: unknown }> };
+      instrument: { instrumentVersionId: string; questions: Array<{ id: string; displayOrder: number }> };
+    };
+    expect(resumedForm.assessment.responses).toHaveLength(1);
+    expect(resumedForm.assessment.responses[0]).toMatchObject({
+      questionId: question.id, answer: { type: 'text', value: 'Synthetic saved form progress' },
+    });
+    expect(resumedForm.instrument.instrumentVersionId).toBe(selected.instrumentVersionId);
+    expect(JSON.stringify(resumedForm)).not.toMatch(/rawScore|equivalentScore|scoringVersion|dimensions/i);
+    expect((await request(`/api/v1/preliminary-assessments/${started.id}/reauthorize`, strangerToken, 'POST', {})).status).toBe(404);
+  });
+
+  it('enforces unique question display positions and complete order before publication', async () => {
+    const catalog = new DrizzleInstrumentCatalog(db);
+    const versionId = randomUUID();
+    const draft: NewInstrumentDraft = {
+      instrumentId: randomUUID(), instrumentVersionId: versionId, version: `it-${randomUUID().slice(0, 16)}`,
+      effectiveAt: new Date(Date.now() - 60_000), status: 'draft',
+      questions: [
+        { id: randomUUID(), prompt: 'Synthetic order one.', responseType: 'boolean', required: true, displayOrder: 1 },
+        { id: randomUUID(), prompt: 'Synthetic order two.', responseType: 'boolean', required: true, displayOrder: 2 },
+      ],
+      approval: { status: 'pending', approvedAt: null, approvalReference: null },
+      license: { status: 'not_reviewed', reference: null },
+    };
+    await catalog.createDraft(draft);
+    const [questionAtTwo] = await db.select({ questionId: assessmentInstrumentQuestions.questionId })
+      .from(assessmentInstrumentQuestions)
+      .where(and(eq(assessmentInstrumentQuestions.instrumentVersionId, versionId), eq(assessmentInstrumentQuestions.displayOrder, 2)));
+    if (!questionAtTwo) throw new Error('Synthetic ordered draft fixture is missing its second question');
+    await expectPostgresCode(pool.query(
+      'UPDATE assessment_instrument_questions SET display_order = 1 WHERE instrument_version_id = $1::uuid AND question_id = $2::uuid',
+      [versionId, questionAtTwo.questionId],
+    ), '23505');
+
+    const missingOrderVersionId = randomUUID();
+    const incompleteDraft: NewInstrumentDraft = {
+      ...draft, instrumentId: randomUUID(), instrumentVersionId: missingOrderVersionId,
+      version: `it-${randomUUID().slice(0, 16)}`,
+      questions: [
+        { id: randomUUID(), prompt: 'Synthetic ordered item.', responseType: 'boolean', required: true, displayOrder: 1 },
+        { id: randomUUID(), prompt: 'Synthetic item whose persisted position will be removed for the trigger test.', responseType: 'boolean', required: true, displayOrder: 2 },
+      ],
+    };
+    await catalog.createDraft(incompleteDraft);
+    const questionToMakeUnordered = incompleteDraft.questions[1];
+    if (!questionToMakeUnordered) throw new Error('Synthetic second question fixture is missing');
+    await db.update(assessmentInstrumentQuestions).set({ displayOrder: null }).where(and(
+      eq(assessmentInstrumentQuestions.instrumentVersionId, missingOrderVersionId),
+      eq(assessmentInstrumentQuestions.questionId, questionToMakeUnordered.id),
+    ));
+    await expectPostgresCode(pool.query(
+      `UPDATE assessment_instrument_versions SET status = 'approved', approval_status = 'approved',
+       approved_at = now(), approval_reference = 'synthetic integration fixture',
+       license_status = 'not_applicable', license_reference = 'synthetic fixture only'
+       WHERE instrument_version_id = $1::uuid`,
+      [missingOrderVersionId],
+    ), '23514');
   });
 
   it('fails closed when consent is absent or withdrawn and creates no answer after withdrawal', async () => {
