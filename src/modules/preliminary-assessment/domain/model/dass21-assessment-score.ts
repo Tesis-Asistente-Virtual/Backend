@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { assessmentResponseSchema, type AssessmentResponse } from './assessment-response.js';
-import type { InstrumentVersion } from './instrument.js';
+import { isInstrumentAvailable, type InstrumentAvailabilityPolicy, type InstrumentVersion } from './instrument.js';
 import type { PreliminaryAssessment } from './preliminary-assessment.js';
 import { PreliminaryAssessmentError } from './assessment-errors.js';
-import { Dass21ScoringError, scoreDass21 } from './dass21-scoring.js';
+import { Dass21ScoringError, scoreDass21, scoreDass21ForSyntheticTechnicalTest } from './dass21-scoring.js';
 import { validateDass21QuestionMapping, type Dass21QuestionMapping } from './dass21-question-mapping.js';
 
 const dimensionsSchema = z.object({
@@ -67,6 +67,8 @@ export function createDass21AssessmentScore(input: {
   instrument: InstrumentVersion;
   mapping: Dass21QuestionMapping;
   calculatedAt: Date;
+  technicalTestOnly?: boolean;
+  availability?: InstrumentAvailabilityPolicy;
 }): Dass21AssessmentScore {
   const { assessment, instrument } = input;
   if (assessment.status !== 'completed' || assessment.mode !== 'structured_instrument' ||
@@ -74,7 +76,8 @@ export function createDass21AssessmentScore(input: {
       Number.isNaN(input.calculatedAt.getTime()) || !assessment.completedAt || input.calculatedAt < assessment.completedAt) {
     throw new Dass21ScoringError('invalid_answers');
   }
-  const mapping = validateDass21QuestionMapping(input.mapping, instrument);
+  const availability = input.availability ?? (value => isInstrumentAvailable(value));
+  const mapping = validateDass21QuestionMapping(input.mapping, instrument, availability, input.calculatedAt);
   const responseByQuestion = new Map<string, AssessmentResponse>();
   for (const responseValue of assessment.responses as readonly unknown[]) {
     const parsedResponse = assessmentResponseSchema.safeParse(responseValue);
@@ -108,7 +111,7 @@ export function createDass21AssessmentScore(input: {
     if (!Number.isInteger(value) || value < 0 || value > 3) throw new Dass21ScoringError('invalid_answers');
     return { instrumentVersionId: response.instrumentVersionId, itemNumber: entry.itemNumber, value };
   });
-  const score = scoreDass21({
+  const scoreInput = {
     instrument: {
       instrumentCode: 'DASS-21',
       instrumentId: instrument.instrumentId,
@@ -119,7 +122,10 @@ export function createDass21AssessmentScore(input: {
       licenseStatus: instrument.license.status,
     },
     answers,
-  });
+  };
+  const score = input.technicalTestOnly
+    ? scoreDass21ForSyntheticTechnicalTest(scoreInput)
+    : scoreDass21(scoreInput);
   return dass21AssessmentScoreSchema.parse({
     schemaVersion: '1.0', status: 'calculated', assessmentId: assessment.assessmentId,
     accountId: assessment.accountId, instrumentCode: 'DASS-21', instrumentId: instrument.instrumentId,

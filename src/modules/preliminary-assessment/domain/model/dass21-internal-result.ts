@@ -13,6 +13,15 @@ export const approvedDass21InterpretationSupportSchema = z.object({
   support: dass21InterpretationSupportSchema,
 }).strict();
 export type ApprovedDass21InterpretationSupport = z.infer<typeof approvedDass21InterpretationSupportSchema>;
+export const technicalTestDass21InterpretationSupportSchema = z.object({
+  status: z.literal('synthetic_technical_test'),
+  support: dass21InterpretationSupportSchema,
+}).strict();
+export const dass21InterpretationSupportForResultSchema = z.discriminatedUnion('status', [
+  approvedDass21InterpretationSupportSchema,
+  technicalTestDass21InterpretationSupportSchema,
+]);
+export type Dass21InterpretationSupportForResult = z.infer<typeof dass21InterpretationSupportForResultSchema>;
 
 const dimensionResultSchema = z.object({
   rawScore: z.number().int().min(0).max(21),
@@ -57,6 +66,7 @@ export const dass21InternalResultSchema = z.discriminatedUnion('status', [
     reason: z.enum([
       'assessment_incomplete',
       'consent_required',
+      'authorization_unavailable',
       'score_unavailable',
       'instrument_unavailable',
       'mapping_unavailable',
@@ -86,30 +96,43 @@ export function buildInternalDass21Result(input: {
   instrument: InstrumentVersion;
   mapping: unknown;
   approvedSupport: unknown;
+  authorization?: 'approved' | 'synthetic_technical_test';
+  availability?: (instrument: InstrumentVersion, at: Date) => boolean;
+  at?: Date;
 }): Dass21InternalResult {
   const scoreParsed = dass21AssessmentScoreSchema.safeParse(input.score);
-  const supportParsed = approvedDass21InterpretationSupportSchema.safeParse(input.approvedSupport);
-  if (!scoreParsed.success || !supportParsed.success || !isInstrumentAvailable(input.instrument)) {
+  const supportParsed = dass21InterpretationSupportForResultSchema.safeParse(input.approvedSupport);
+  const isTechnicalTest = input.authorization === 'synthetic_technical_test';
+  const supportIsAllowed = supportParsed.success && (isTechnicalTest
+    ? supportParsed.data.status === 'synthetic_technical_test'
+    : supportParsed.data.status === 'approved');
+  const instrumentIsAllowed = isTechnicalTest
+    ? input.instrument.instrumentId === '00000000-0000-4000-8000-000000008a91' &&
+      input.instrument.instrumentVersionId === '00000000-0000-4000-8000-000000008a92' &&
+      input.instrument.version === 'dass21-spanish-candidate-1.1' && input.instrument.status === 'draft' &&
+      input.instrument.approval.status === 'pending' && input.instrument.license.status === 'not_reviewed'
+    : isInstrumentAvailable(input.instrument);
+  if (!scoreParsed.success || !supportIsAllowed || !instrumentIsAllowed) {
     throw new Dass21InternalResultError('invalid_result_context');
   }
 
   const score: Dass21AssessmentScore = scoreParsed.data;
-  const support: ApprovedDass21InterpretationSupport = supportParsed.data;
+  const support = supportParsed.data.support;
   const instrument = input.instrument;
   let mapping: Dass21QuestionMapping;
-  try { mapping = validateDass21QuestionMapping(input.mapping, instrument); }
+  try { mapping = validateDass21QuestionMapping(input.mapping, instrument, input.availability, input.at); }
   catch { throw new Dass21InternalResultError('invalid_result_context'); }
   if (score.assessmentId !== input.assessmentId || score.instrumentId !== instrument.instrumentId ||
       score.instrumentVersionId !== instrument.instrumentVersionId || score.instrumentVersionId !== mapping.instrumentVersionId ||
       score.mappingId !== mapping.mappingId || score.mappingVersion !== mapping.mappingVersion || mapping.status !== 'frozen' ||
-      mapping.instrumentId !== instrument.instrumentId || support.support.instrumentVersionId !== instrument.instrumentVersionId ||
-      support.support.scoringVersion !== score.scoringVersion) {
+      mapping.instrumentId !== instrument.instrumentId || support.instrumentVersionId !== instrument.instrumentVersionId ||
+      support.scoringVersion !== score.scoringVersion) {
     throw new Dass21InternalResultError('invalid_result_context');
   }
 
   let interpretation;
   try {
-    interpretation = categorizeDass21Score(score, support.support);
+    interpretation = categorizeDass21Score(score, support);
   } catch {
     throw new Dass21InternalResultError('invalid_interpretation_support');
   }

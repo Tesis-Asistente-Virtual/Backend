@@ -6,11 +6,13 @@ export class GetMyAssessmentForm {
     instruments;
     consent;
     clock;
-    constructor(assessments, instruments, consent, clock = () => new Date()) {
+    availability;
+    constructor(assessments, instruments, consent, clock = () => new Date(), availability = instrument => isInstrumentAvailable(instrument)) {
         this.assessments = assessments;
         this.instruments = instruments;
         this.consent = consent;
         this.clock = clock;
+        this.availability = availability;
     }
     async execute(assessmentId, accountId) {
         const assessment = await this.assessments.findByIdForOwner(assessmentId, accountId);
@@ -23,7 +25,7 @@ export class GetMyAssessmentForm {
             throw new PreliminaryAssessmentError('instrument_version_mismatch');
         await this.assertCurrentConsent(assessment.accountId, assessment.consentNoticeVersionId);
         const instrument = await this.instruments.findAvailableByVersionId(assessment.instrumentVersionId, this.clock());
-        if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId || !isInstrumentAvailable(instrument)) {
+        if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId || !this.availability(instrument, this.clock())) {
             throw new PreliminaryAssessmentError('instrument_unavailable');
         }
         // Recheck after assembling the response; a withdrawal or notice replacement fails closed.

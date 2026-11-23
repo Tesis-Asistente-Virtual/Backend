@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { Dass21ScoringError, DASS21_SCORING_VERSION, scoreDass21 } from '../../../src/modules/preliminary-assessment/domain/model/dass21-scoring.js';
+import { Dass21ScoringError, DASS21_SCORING_VERSION, scoreDass21, scoreDass21ForSyntheticTechnicalTest, DASS21_TECHNICAL_TEST_INSTRUMENT_ID, DASS21_TECHNICAL_TEST_VERSION_ID, DASS21_TECHNICAL_TEST_VERSION } from '../../../src/modules/preliminary-assessment/domain/model/dass21-scoring.js';
 
 const instrument = {
   instrumentCode: 'DASS-21',
@@ -42,6 +42,22 @@ describe('DASS-21 deterministic scoring engine', () => {
       expect(zero.dimensions[dimension]).toEqual({ rawScore: 0, equivalentScore: 0 });
       expect(max.dimensions[dimension]).toEqual({ rawScore: 21, equivalentScore: 42 });
     }
+  });
+
+  it('permits technical scoring only for the exact pending synthetic candidate', () => {
+    const candidate = {
+      ...instrument, instrumentId: DASS21_TECHNICAL_TEST_INSTRUMENT_ID,
+      instrumentVersionId: DASS21_TECHNICAL_TEST_VERSION_ID, version: DASS21_TECHNICAL_TEST_VERSION,
+      status: 'draft', approvalStatus: 'pending', licenseStatus: 'not_reviewed',
+    } as const;
+    expect(() => scoreDass21({ instrument: candidate, answers: answers(() => 1, DASS21_TECHNICAL_TEST_VERSION_ID) }))
+      .toThrowError(expect.objectContaining({ code: 'instrument_not_approved' }));
+    const result = scoreDass21ForSyntheticTechnicalTest({ instrument: candidate, answers: answers(() => 1, DASS21_TECHNICAL_TEST_VERSION_ID) });
+    expect(result.dimensions.depression).toEqual({ rawScore: 7, equivalentScore: 14 });
+    expect(result.dimensions.anxiety).toEqual({ rawScore: 7, equivalentScore: 14 });
+    expect(result.dimensions.stress).toEqual({ rawScore: 7, equivalentScore: 14 });
+    expect(() => scoreDass21ForSyntheticTechnicalTest({ instrument: { ...candidate, instrumentVersionId: randomUUID() }, answers: answers(() => 1, DASS21_TECHNICAL_TEST_VERSION_ID) }))
+      .toThrowError(expect.objectContaining({ code: 'instrument_not_approved' }));
   });
 
   it('uses the scoring key for each dimension without aggregating a global total', () => {

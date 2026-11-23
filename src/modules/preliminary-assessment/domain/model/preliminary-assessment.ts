@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { assessmentResponseSchema, type AssessmentResponse } from './assessment-response.js';
 import { upsertAssessmentResponse, validateResponseForInstrument } from './assessment-response.js';
 import type { InstrumentVersion } from './instrument.js';
-import { isInstrumentAvailable } from './instrument.js';
+import { isInstrumentAvailable, type InstrumentAvailabilityPolicy } from './instrument.js';
 import { PreliminaryAssessmentError } from './assessment-errors.js';
 
 export const assessmentStatuses = ['in_progress', 'paused', 'completed', 'withdrawn', 'expired'] as const;
@@ -153,13 +153,14 @@ export function recordAssessmentResponse(
   assessment: PreliminaryAssessment,
   responseValue: unknown,
   instrument: InstrumentVersion,
+  availability: InstrumentAvailabilityPolicy = instrumentValue => isInstrumentAvailable(instrumentValue),
 ): PreliminaryAssessment {
   if (assessment.status !== 'in_progress') throw new PreliminaryAssessmentError('assessment_closed');
   if (assessment.instrumentVersionId === null || assessment.instrumentVersionId !== instrument.instrumentVersionId) {
     throw new PreliminaryAssessmentError('instrument_version_mismatch');
   }
-  if (!isInstrumentAvailable(instrument)) throw new PreliminaryAssessmentError('instrument_unavailable');
   const response = validateResponseForInstrument(responseValue, instrument);
+  if (!availability(instrument, response.updatedAt)) throw new PreliminaryAssessmentError('instrument_unavailable');
   if (response.assessmentId !== assessment.assessmentId) throw new PreliminaryAssessmentError('invalid_response');
   if (response.updatedAt < assessment.updatedAt) throw new PreliminaryAssessmentError('invalid_response');
   const responses = upsertAssessmentResponse(assessment.responses, response);
@@ -170,6 +171,7 @@ export function completeAssessment(
   assessment: PreliminaryAssessment,
   at: Date,
   instrument?: InstrumentVersion,
+  availability: InstrumentAvailabilityPolicy = instrumentValue => isInstrumentAvailable(instrumentValue),
 ): PreliminaryAssessment {
   if (assessment.status === 'completed') return assessment;
   if (assessment.status !== 'in_progress') throw new PreliminaryAssessmentError('invalid_transition');
@@ -177,7 +179,7 @@ export function completeAssessment(
     if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId) {
       throw new PreliminaryAssessmentError('instrument_version_mismatch');
     }
-    if (!isInstrumentAvailable(instrument)) throw new PreliminaryAssessmentError('instrument_unavailable');
+    if (!availability(instrument, at)) throw new PreliminaryAssessmentError('instrument_unavailable');
     const requiredIds = instrument.questions.filter(question => question.required).map(question => question.id);
     const answeredIds = new Set(assessment.responses.filter(response => response.status === 'answered').map(response => response.questionId));
     if (requiredIds.some(id => !answeredIds.has(id))) throw new PreliminaryAssessmentError('responses_incomplete');

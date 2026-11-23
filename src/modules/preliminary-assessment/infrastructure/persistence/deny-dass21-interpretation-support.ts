@@ -2,7 +2,7 @@ import type { Dass21InterpretationSupportProvider } from '../../application/port
 
 /** Default fail-closed provider until professional and study-specific support is explicitly approved. */
 export class DenyDass21InterpretationSupport implements Dass21InterpretationSupportProvider {
-  async getApprovedSupport(_instrumentVersionId: string) {
+  getApprovedSupport(_instrumentVersionId: string) {
     return null;
   }
 }

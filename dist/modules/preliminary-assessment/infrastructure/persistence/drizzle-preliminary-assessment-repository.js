@@ -5,6 +5,7 @@ import { preliminaryAssessmentResultSchema } from '../../domain/model/assessment
 import { restorePreliminaryAssessment } from '../../domain/model/preliminary-assessment.js';
 import { assessmentAnswers, assessmentResults, preliminaryAssessments } from './schema.js';
 import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 function toResponse(row) {
     const parsed = assessmentResponseSchema.safeParse({
         assessmentId: row.assessmentId,
@@ -54,14 +55,19 @@ function assessmentValues(assessment) {
 }
 export class DrizzlePreliminaryAssessmentRepository {
     db;
-    constructor(db) {
+    technicalTestInstrumentVersionId;
+    constructor(db, technicalTestInstrumentVersionId) {
         this.db = db;
+        this.technicalTestInstrumentVersionId = technicalTestInstrumentVersionId;
     }
     async create(assessment) {
         const valid = restorePreliminaryAssessment(assessment);
         if (valid.status !== 'in_progress' || valid.responses.length > 0)
             throw new PreliminaryAssessmentError('invalid_assessment');
         await this.db.transaction(async (tx) => {
+            // This transaction-local capability is only injected by the isolated
+            // technical-test composition and is constrained to its fixed candidate.
+            await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, valid.instrumentVersionId);
             await requireCurrentPreliminaryAssessmentConsent(tx, valid.accountId, valid.consentNoticeVersionId, valid.startedAt);
             await tx.insert(preliminaryAssessments).values(assessmentValues(valid));
         });
@@ -101,6 +107,7 @@ export class DrizzlePreliminaryAssessmentRepository {
         if (valid.accountId !== accountId || valid.status === 'completed' || valid.updatedAt <= expectedUpdatedAt)
             return false;
         return this.db.transaction(async (tx) => {
+            await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, valid.instrumentVersionId);
             if (valid.status === 'in_progress' || valid.status === 'paused') {
                 await requireCurrentPreliminaryAssessmentConsent(tx, accountId, valid.consentNoticeVersionId, valid.updatedAt);
             }

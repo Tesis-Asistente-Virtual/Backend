@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GetMyInternalDass21Result } from '../../../src/modules/preliminary-assessment/application/internal/query-services/get-my-internal-dass21-result.js';
+import type { Dass21InternalResultReadSession, Dass21InternalResultReadUnitOfWork } from '../../../src/modules/preliminary-assessment/application/ports/dass21-internal-result-read-unit-of-work.js';
 import { createDass21AssessmentScore } from '../../../src/modules/preliminary-assessment/domain/model/dass21-assessment-score.js';
 import { createPreliminaryAssessment, completeAssessment, recordAssessmentResponse } from '../../../src/modules/preliminary-assessment/domain/model/preliminary-assessment.js';
 import { freezeDass21QuestionMapping, validateDass21QuestionMapping } from '../../../src/modules/preliminary-assessment/domain/model/dass21-question-mapping.js';
@@ -57,18 +58,23 @@ function setup() {
     },
   };
 
-  const assessments = { findByIdForOwner: vi.fn(async (id: string, owner: string) => id === assessmentId && owner === accountId ? assessment : null) };
-  const instruments = { findAvailableByVersionId: vi.fn(async () => instrument) };
-  const mappings = { findFrozen: vi.fn(async () => mapping) };
-  const scores = { findByAssessmentForOwner: vi.fn(async () => score) };
-  const consent = { getCurrentNoticeVersionId: vi.fn(async () => noticeId) };
-  const supportProvider = { getApprovedSupport: vi.fn(async () => support) };
-  const query = () => new GetMyInternalDass21Result(assessments as never, instruments as never, mappings as never, scores as never, consent, supportProvider, () => new Date(completedAt.getTime() + 2));
-  return { accountId, assessmentId, noticeId, assessment, instrument, mapping, score, support, assessments, instruments, mappings, scores, consent, supportProvider, query };
+  const session = {
+    requireCurrentConsentNotice: vi.fn(async () => noticeId),
+    findAssessmentForOwner: vi.fn(async (id: string, owner: string) => id === assessmentId && owner === accountId ? assessment : null),
+    findAvailableInstrumentVersion: vi.fn(async () => instrument),
+    findFrozenMapping: vi.fn(async () => mapping),
+    findScoreForOwner: vi.fn(async () => score),
+  };
+  const reads: Dass21InternalResultReadUnitOfWork = {
+    execute: vi.fn(async work => work(session as unknown as Dass21InternalResultReadSession)),
+  };
+  const supportProvider = { getApprovedSupport: vi.fn(() => support) };
+  const query = () => new GetMyInternalDass21Result(reads, supportProvider, () => new Date(completedAt.getTime() + 2));
+  return { accountId, assessmentId, noticeId, assessment, instrument, mapping, score, support, session, reads, supportProvider, query };
 }
 
 describe('GetMyInternalDass21Result', () => {
-  it('returns a deterministic versioned internal result with three separate dimensions and limitations', async () => {
+  it('returns a deterministic versioned result within one read unit of work', async () => {
     const fixture = setup();
     const result = await fixture.query().execute(fixture.assessmentId, fixture.accountId);
     expect(result).toMatchObject({
@@ -81,83 +87,85 @@ describe('GetMyInternalDass21Result', () => {
     expect(result).not.toHaveProperty('overallCategory');
     expect(result.limitations).toContain('not_a_diagnosis');
     await expect(fixture.query().execute(fixture.assessmentId, fixture.accountId)).resolves.toEqual(result);
+    expect(fixture.reads.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('conceals non-owner assessments', async () => {
+  it('checks consent before reading owner assessment and sensitive result material', async () => {
+    const fixture = setup();
+    await fixture.query().execute(fixture.assessmentId, fixture.accountId);
+    const callOrder = [
+      fixture.session.requireCurrentConsentNotice.mock.invocationCallOrder[0],
+      fixture.session.findAssessmentForOwner.mock.invocationCallOrder[0],
+      fixture.session.findAvailableInstrumentVersion.mock.invocationCallOrder[0],
+      fixture.supportProvider.getApprovedSupport.mock.invocationCallOrder[0],
+      fixture.session.findScoreForOwner.mock.invocationCallOrder[0],
+      fixture.session.findFrozenMapping.mock.invocationCallOrder[0],
+    ];
+    expect(callOrder).toEqual([...callOrder].sort((left, right) => left - right));
+  });
+
+  it('conceals non-owner assessments and does not read score material', async () => {
     const fixture = setup();
     await expect(fixture.query().execute(fixture.assessmentId, randomUUID())).rejects.toMatchObject({ code: 'assessment_not_found' });
-    expect(fixture.scores.findByAssessmentForOwner).not.toHaveBeenCalled();
+    expect(fixture.session.findScoreForOwner).not.toHaveBeenCalled();
   });
 
-  it('returns not_available for incomplete assessments, withdrawn consent, and checker failure', async () => {
-    const incomplete = setup();
-    incomplete.assessments.findByIdForOwner.mockResolvedValueOnce({ ...incomplete.assessment, status: 'in_progress', completedAt: null });
-    await expect(incomplete.query().execute(incomplete.assessmentId, incomplete.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'assessment_incomplete' });
-
+  it('fails closed for withdrawn or unavailable consent and assessment notice replacement', async () => {
     const withdrawn = setup();
-    withdrawn.consent.getCurrentNoticeVersionId.mockResolvedValue(null);
-    await expect(withdrawn.query().execute(withdrawn.assessmentId, withdrawn.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
-    expect(withdrawn.scores.findByAssessmentForOwner).not.toHaveBeenCalled();
+    withdrawn.session.requireCurrentConsentNotice.mockRejectedValue(new Error('private checker detail'));
+    await expect(withdrawn.query().execute(withdrawn.assessmentId, withdrawn.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
+    expect(withdrawn.session.findAssessmentForOwner).not.toHaveBeenCalled();
 
-    const checkerFailure = setup();
-    checkerFailure.consent.getCurrentNoticeVersionId.mockRejectedValue(new Error('private adapter detail'));
-    await expect(checkerFailure.query().execute(checkerFailure.assessmentId, checkerFailure.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
+    const replaced = setup();
+    replaced.session.requireCurrentConsentNotice.mockResolvedValue(randomUUID());
+    await expect(replaced.query().execute(replaced.assessmentId, replaced.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
+    expect(replaced.session.findScoreForOwner).not.toHaveBeenCalled();
   });
 
-  it('fails closed for a missing score, unsupported instrument version, mapping, or support', async () => {
+  it('fails closed for incomplete, withdrawn, or changed assessments', async () => {
+    const incomplete = setup();
+    incomplete.session.findAssessmentForOwner.mockResolvedValueOnce({ ...incomplete.assessment, status: 'in_progress', completedAt: null });
+    await expect(incomplete.query().execute(incomplete.assessmentId, incomplete.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'assessment_incomplete' });
+
+    const reauthorized = setup();
+    reauthorized.session.findAssessmentForOwner.mockResolvedValueOnce({ ...reauthorized.assessment, consentNoticeVersionId: randomUUID() });
+    await expect(reauthorized.query().execute(reauthorized.assessmentId, reauthorized.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
+
+    const transactionFailure = setup();
+    transactionFailure.reads.execute = vi.fn(async () => { throw new Error('private SQL detail'); });
+    await expect(transactionFailure.query().execute(transactionFailure.assessmentId, transactionFailure.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'authorization_unavailable' });
+  });
+
+  it('fails closed for missing or invalid scores, instruments, mappings, and interpretation support', async () => {
     const missingScore = setup();
-    missingScore.scores.findByAssessmentForOwner.mockResolvedValue(null);
-    await expect(missingScore.query().execute(missingScore.assessmentId, missingScore.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'score_unavailable' });
-
-    const incompatibleInstrument = setup();
-    incompatibleInstrument.instruments.findAvailableByVersionId.mockResolvedValue(null);
-    await expect(incompatibleInstrument.query().execute(incompatibleInstrument.assessmentId, incompatibleInstrument.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'instrument_unavailable' });
-
-    const missingMapping = setup();
-    missingMapping.mappings.findFrozen.mockResolvedValue(null);
-    await expect(missingMapping.query().execute(missingMapping.assessmentId, missingMapping.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'mapping_unavailable' });
-
-    const noSupport = setup();
-    noSupport.supportProvider.getApprovedSupport.mockResolvedValue(null);
-    await expect(noSupport.query().execute(noSupport.assessmentId, noSupport.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'interpretation_support_unavailable' });
-    expect(noSupport.scores.findByAssessmentForOwner).not.toHaveBeenCalled();
-
-    const unapprovedInstrument = setup();
-    unapprovedInstrument.instruments.findAvailableByVersionId.mockResolvedValueOnce({
-      ...unapprovedInstrument.instrument,
-      status: 'draft',
-    });
-    await expect(unapprovedInstrument.query().execute(unapprovedInstrument.assessmentId, unapprovedInstrument.accountId))
-      .resolves.toMatchObject({ status: 'not_available', reason: 'instrument_unavailable' });
-    expect(unapprovedInstrument.supportProvider.getApprovedSupport).not.toHaveBeenCalled();
-
-    const unapprovedSupport = setup();
-    unapprovedSupport.supportProvider.getApprovedSupport.mockResolvedValueOnce({ status: 'pending' } as never);
-    await expect(unapprovedSupport.query().execute(unapprovedSupport.assessmentId, unapprovedSupport.accountId))
-      .resolves.toMatchObject({ status: 'not_available', reason: 'interpretation_support_unavailable' });
-    expect(unapprovedSupport.scores.findByAssessmentForOwner).not.toHaveBeenCalled();
-
-    const mismatchedSupport = setup();
-    mismatchedSupport.supportProvider.getApprovedSupport.mockResolvedValueOnce({
-      ...mismatchedSupport.support,
-      support: { ...mismatchedSupport.support.support, instrumentVersionId: randomUUID() },
-    });
-    await expect(mismatchedSupport.query().execute(mismatchedSupport.assessmentId, mismatchedSupport.accountId))
-      .resolves.toMatchObject({ status: 'not_available', reason: 'interpretation_support_unavailable' });
-    expect(mismatchedSupport.scores.findByAssessmentForOwner).not.toHaveBeenCalled();
-  });
-
-  it('revalidates consent after loading score material and rejects mismatched score ownership/version', async () => {
-    const revokedDuringRead = setup();
-    revokedDuringRead.consent.getCurrentNoticeVersionId.mockResolvedValueOnce(revokedDuringRead.noticeId).mockResolvedValueOnce(null);
-    await expect(revokedDuringRead.query().execute(revokedDuringRead.assessmentId, revokedDuringRead.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'consent_required' });
-
-    const wrongVersion = setup();
-    wrongVersion.scores.findByAssessmentForOwner.mockResolvedValueOnce({ ...wrongVersion.score, instrumentVersionId: randomUUID() });
-    await expect(wrongVersion.query().execute(wrongVersion.assessmentId, wrongVersion.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'score_invalid' });
+    missingScore.session.findScoreForOwner.mockResolvedValue(null);
+    await expect(missingScore.query().execute(missingScore.assessmentId, missingScore.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'score_unavailable' });
 
     const wrongOwner = setup();
-    wrongOwner.scores.findByAssessmentForOwner.mockResolvedValueOnce({ ...wrongOwner.score, accountId: randomUUID() });
-    await expect(wrongOwner.query().execute(wrongOwner.assessmentId, wrongOwner.accountId)).resolves.toMatchObject({ status: 'not_available', reason: 'score_invalid' });
+    wrongOwner.session.findScoreForOwner.mockResolvedValueOnce({ ...wrongOwner.score, accountId: randomUUID() });
+    await expect(wrongOwner.query().execute(wrongOwner.assessmentId, wrongOwner.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'score_invalid' });
+
+    const noInstrument = setup();
+    noInstrument.session.findAvailableInstrumentVersion.mockResolvedValue(null);
+    await expect(noInstrument.query().execute(noInstrument.assessmentId, noInstrument.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'instrument_unavailable' });
+
+    const noMapping = setup();
+    noMapping.session.findFrozenMapping.mockResolvedValue(null);
+    await expect(noMapping.query().execute(noMapping.assessmentId, noMapping.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'mapping_unavailable' });
+
+    const noSupport = setup();
+    noSupport.supportProvider.getApprovedSupport.mockReturnValue(null);
+    await expect(noSupport.query().execute(noSupport.assessmentId, noSupport.accountId))
+      .resolves.toMatchObject({ status: 'not_available', reason: 'interpretation_support_unavailable' });
+    expect(noSupport.session.findScoreForOwner).not.toHaveBeenCalled();
   });
 });

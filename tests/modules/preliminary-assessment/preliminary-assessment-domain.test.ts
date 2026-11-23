@@ -162,6 +162,27 @@ describe('PreliminaryAssessment domain', () => {
     }, instrument)).toThrow(PreliminaryAssessmentError);
   });
 
+  it('rejects an option id that belongs only to a different question', () => {
+    const instrument = approvedInstrument({ questions: [
+      { id: randomUUID(), prompt: 'Synthetic choice A', responseType: 'single_choice', required: true, options: [{ id: 'a-yes', label: 'Yes' }] },
+      { id: randomUUID(), prompt: 'Synthetic choice B', responseType: 'single_choice', required: true, options: [{ id: 'b-no', label: 'No' }] },
+    ] });
+    const first = instrument.questions[0];
+    const second = instrument.questions[1];
+    if (!first || !second) throw new Error('Fixture questions missing');
+    const assessment = newAssessment('structured_instrument', instrument.instrumentVersionId);
+    const at = new Date('2026-04-01T00:01:00.000Z');
+
+    expect(() => recordAssessmentResponse(assessment, {
+      assessmentId: assessment.assessmentId, instrumentVersionId: instrument.instrumentVersionId, questionId: first.id,
+      status: 'answered', answer: { type: 'single_choice', optionId: second.options[0]!.id }, createdAt: at, updatedAt: at,
+    }, instrument)).toThrow(PreliminaryAssessmentError);
+    expect(recordAssessmentResponse(assessment, {
+      assessmentId: assessment.assessmentId, instrumentVersionId: instrument.instrumentVersionId, questionId: first.id,
+      status: 'answered', answer: { type: 'single_choice', optionId: first.options[0]!.id }, createdAt: at, updatedAt: at,
+    }, instrument, () => true).responses).toHaveLength(1);
+  });
+
   it('edits the current response rather than duplicating it and detects corrupt duplicate state', () => {
     const at = new Date('2026-04-01T00:01:00.000Z');
     const first = {

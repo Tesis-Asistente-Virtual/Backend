@@ -1,18 +1,21 @@
 import { completeAssessment } from '../../../domain/model/preliminary-assessment.js';
 import { createUnavailableAssessmentResult } from '../../../domain/model/assessment-result.js';
 import { PreliminaryAssessmentError } from '../../../domain/model/assessment-errors.js';
+import { isInstrumentAvailable } from '../../../domain/model/instrument.js';
 export class CompletePreliminaryAssessment {
     assessments;
     results;
     instruments;
     consent;
     clock;
-    constructor(assessments, results, instruments, consent, clock = () => new Date()) {
+    availability;
+    constructor(assessments, results, instruments, consent, clock = () => new Date(), availability = instrument => isInstrumentAvailable(instrument)) {
         this.assessments = assessments;
         this.results = results;
         this.instruments = instruments;
         this.consent = consent;
         this.clock = clock;
+        this.availability = availability;
     }
     async execute(assessmentId, accountId) {
         const current = await this.assessments.findByIdForOwner(assessmentId, accountId);
@@ -34,7 +37,7 @@ export class CompletePreliminaryAssessment {
                 throw new PreliminaryAssessmentError('instrument_unavailable');
         }
         const at = new Date(Math.max(this.clock().getTime(), current.updatedAt.getTime() + 1));
-        const completed = completeAssessment(current, at, instrument);
+        const completed = completeAssessment(current, at, instrument, this.availability);
         const result = createUnavailableAssessmentResult(completed.assessmentId, completed.instrumentVersionId, at);
         const saved = await this.assessments.completeWithResultForOwner(completed, result, accountId, current.updatedAt);
         if (!saved) {

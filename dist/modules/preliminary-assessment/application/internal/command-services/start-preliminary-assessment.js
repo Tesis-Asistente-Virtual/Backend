@@ -7,18 +7,20 @@ export class StartPreliminaryAssessment {
     instruments;
     consent;
     clock;
-    constructor(assessments, instruments, consent, clock = () => new Date()) {
+    availability;
+    constructor(assessments, instruments, consent, clock = () => new Date(), availability = instrument => isInstrumentAvailable(instrument)) {
         this.assessments = assessments;
         this.instruments = instruments;
         this.consent = consent;
         this.clock = clock;
+        this.availability = availability;
     }
     async execute(accountId, instrumentVersionId) {
         const consentNoticeVersionId = await this.consent.getCurrentNoticeVersionId(accountId);
         if (!consentNoticeVersionId)
             throw new PreliminaryAssessmentError('consent_required');
         const selected = await this.instruments.findAvailableByVersionId(instrumentVersionId, this.clock());
-        if (!selected || !isInstrumentAvailable(selected))
+        if (!selected || !this.availability(selected, this.clock()))
             throw new PreliminaryAssessmentError('instrument_unavailable');
         const now = this.clock();
         if (selected.effectiveAt > now)

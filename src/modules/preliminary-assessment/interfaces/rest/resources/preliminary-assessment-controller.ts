@@ -26,6 +26,11 @@ export class PreliminaryAssessmentController {
     private readonly completeAssessment: CompleteAssessment,
     private readonly reauthorizeAssessment: ReauthorizeAssessment,
     private readonly getResult: GetMyAssessmentResult,
+    private readonly formMetadata?: (instrumentVersionId: string) => Readonly<Record<string, unknown>>,
+    private readonly technicalResult?: {
+      scoreCompleted(assessmentId: string, accountId: string): Promise<unknown>;
+      getResult(assessmentId: string, accountId: string): Promise<unknown>;
+    },
   ) {}
 
   async assessmentInfo(_req: Request, res: Response): Promise<void> {
@@ -33,6 +38,7 @@ export class PreliminaryAssessmentController {
     res.status(200).json({ ...info, instruments: info.instruments.map(item => ({
       instrumentId: item.instrumentId, instrumentVersionId: item.instrumentVersionId,
       version: item.version, effectiveAt: item.effectiveAt.toISOString(), questions: item.questions,
+      ...(this.formMetadata?.(item.instrumentVersionId) ?? {}),
     })) });
   }
 
@@ -69,6 +75,7 @@ export class PreliminaryAssessmentController {
       instrument: {
         ...form.instrument,
         effectiveAt: form.instrument.effectiveAt.toISOString(),
+        ...(this.formMetadata?.(form.instrument.instrumentVersionId) ?? {}),
       },
     });
   }
@@ -110,6 +117,7 @@ export class PreliminaryAssessmentController {
     const { id } = assessmentIdParamsSchema.parse(req.params);
     emptyAssessmentBodySchema.parse(req.body ?? {});
     const completed = await this.completeAssessment.execute(id, accountId);
+    await this.technicalResult?.scoreCompleted(id, accountId);
     res.status(200).json({ assessment: toAssessmentResource(completed.assessment), result: toAssessmentResultResource(completed.result) });
   }
 
@@ -117,6 +125,10 @@ export class PreliminaryAssessmentController {
     const accountId = req.auth?.accountId;
     if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
     const { id } = assessmentIdParamsSchema.parse(req.params);
+    if (this.technicalResult) {
+      res.status(200).json(await this.technicalResult.getResult(id, accountId));
+      return;
+    }
     res.status(200).json(toAssessmentResultResource(await this.getResult.execute(id, accountId)));
   }
 }

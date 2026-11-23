@@ -13,7 +13,9 @@ export class PreliminaryAssessmentController {
     completeAssessment;
     reauthorizeAssessment;
     getResult;
-    constructor(info, start, list, get, getForm, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, reauthorizeAssessment, getResult) {
+    formMetadata;
+    technicalResult;
+    constructor(info, start, list, get, getForm, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, reauthorizeAssessment, getResult, formMetadata, technicalResult) {
         this.info = info;
         this.start = start;
         this.list = list;
@@ -26,12 +28,15 @@ export class PreliminaryAssessmentController {
         this.completeAssessment = completeAssessment;
         this.reauthorizeAssessment = reauthorizeAssessment;
         this.getResult = getResult;
+        this.formMetadata = formMetadata;
+        this.technicalResult = technicalResult;
     }
     async assessmentInfo(_req, res) {
         const info = await this.info.execute();
         res.status(200).json({ ...info, instruments: info.instruments.map(item => ({
                 instrumentId: item.instrumentId, instrumentVersionId: item.instrumentVersionId,
                 version: item.version, effectiveAt: item.effectiveAt.toISOString(), questions: item.questions,
+                ...(this.formMetadata?.(item.instrumentVersionId) ?? {}),
             })) });
     }
     async startAssessment(req, res) {
@@ -76,6 +81,7 @@ export class PreliminaryAssessmentController {
             instrument: {
                 ...form.instrument,
                 effectiveAt: form.instrument.effectiveAt.toISOString(),
+                ...(this.formMetadata?.(form.instrument.instrumentVersionId) ?? {}),
             },
         });
     }
@@ -124,6 +130,7 @@ export class PreliminaryAssessmentController {
         const { id } = assessmentIdParamsSchema.parse(req.params);
         emptyAssessmentBodySchema.parse(req.body ?? {});
         const completed = await this.completeAssessment.execute(id, accountId);
+        await this.technicalResult?.scoreCompleted(id, accountId);
         res.status(200).json({ assessment: toAssessmentResource(completed.assessment), result: toAssessmentResultResource(completed.result) });
     }
     async result(req, res) {
@@ -133,6 +140,10 @@ export class PreliminaryAssessmentController {
             return;
         }
         const { id } = assessmentIdParamsSchema.parse(req.params);
+        if (this.technicalResult) {
+            res.status(200).json(await this.technicalResult.getResult(id, accountId));
+            return;
+        }
         res.status(200).json(toAssessmentResultResource(await this.getResult.execute(id, accountId)));
     }
 }

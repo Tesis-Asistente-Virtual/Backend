@@ -1,11 +1,12 @@
 import { and, eq } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
-import { parseInstrumentVersion } from '../../domain/model/instrument.js';
+import { isInstrumentAvailable, parseInstrumentVersion, type InstrumentAvailabilityPolicy } from '../../domain/model/instrument.js';
 import { Dass21ScoringError } from '../../domain/model/dass21-scoring.js';
 import { freezeDass21QuestionMapping, validateDass21QuestionMapping, type Dass21QuestionMapping } from '../../domain/model/dass21-question-mapping.js';
 import type { Dass21QuestionMappingRepository } from '../../domain/repositories/dass21-question-mapping-repository.js';
 import { assessmentInstrumentQuestions, assessmentInstrumentVersions, assessmentScoringItemMappings, assessmentScoringMappingVersions } from './schema.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 
 type MappingVersionRow = typeof assessmentScoringMappingVersions.$inferSelect;
 type MappingItemRow = typeof assessmentScoringItemMappings.$inferSelect;
@@ -40,7 +41,11 @@ async function readInstrument(
 }
 
 export class DrizzleDass21QuestionMappingRepository implements Dass21QuestionMappingRepository {
-  constructor(private readonly db: NodePgDatabase<typeof schema>) {}
+  constructor(
+    private readonly db: NodePgDatabase<typeof schema>,
+    private readonly availability: InstrumentAvailabilityPolicy = instrument => isInstrumentAvailable(instrument),
+    private readonly technicalTestInstrumentVersionId?: string,
+  ) {}
 
   async saveDraft(mappingValue: Dass21QuestionMapping): Promise<void> {
     if (mappingValue.status !== 'draft' || mappingValue.frozenAt !== null) throw new Dass21ScoringError('invalid_instrument');
@@ -50,7 +55,7 @@ export class DrizzleDass21QuestionMappingRepository implements Dass21QuestionMap
         .where(eq(assessmentInstrumentVersions.instrumentVersionId, mappingValue.instrumentVersionId)).for('update').limit(1);
       if (!instrumentRow) throw new Dass21ScoringError('invalid_instrument');
       const instrument = await readInstrument(tx, mappingValue.instrumentVersionId);
-      const mapping = validateDass21QuestionMapping(mappingValue, instrument);
+      const mapping = validateDass21QuestionMapping(mappingValue, instrument, this.availability, mappingValue.createdAt);
       await tx.insert(assessmentScoringMappingVersions).values({
         mappingId: mapping.mappingId, instrumentId: mapping.instrumentId, instrumentVersionId: mapping.instrumentVersionId,
         mappingVersion: mapping.mappingVersion, status: 'draft', createdAt: mapping.createdAt, frozenAt: null,
@@ -77,8 +82,9 @@ export class DrizzleDass21QuestionMappingRepository implements Dass21QuestionMap
       const items = await tx.select().from(assessmentScoringItemMappings).where(eq(assessmentScoringItemMappings.mappingId, mappingId));
       const mapping = toMapping(row, items);
       const instrument = await readInstrument(tx, instrumentVersionId);
-      const valid = validateDass21QuestionMapping(mapping, instrument);
-      const frozen = freezeDass21QuestionMapping(valid, frozenAt);
+      const authorized = validateDass21QuestionMapping(mapping, instrument, this.availability, frozenAt);
+      const frozen = freezeDass21QuestionMapping(authorized, frozenAt);
+      await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, instrumentVersionId);
       const [updated] = await tx.update(assessmentScoringMappingVersions).set({ status: 'frozen', frozenAt })
         .where(and(eq(assessmentScoringMappingVersions.mappingId, mappingId), eq(assessmentScoringMappingVersions.status, 'draft')))
         .returning();
@@ -101,6 +107,6 @@ export class DrizzleDass21QuestionMappingRepository implements Dass21QuestionMap
       this.db.select().from(assessmentScoringItemMappings).where(eq(assessmentScoringItemMappings.mappingId, row.mappingId)),
       readInstrument(this.db, instrumentVersionId),
     ]);
-    return validateDass21QuestionMapping(toMapping(row, items), instrument);
+    return validateDass21QuestionMapping(toMapping(row, items), instrument, this.availability, new Date());
   }
 }

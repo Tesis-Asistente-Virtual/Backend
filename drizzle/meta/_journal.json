@@ -64,6 +64,20 @@
       "when": 1795403600425,
       "tag": "0008_monitoring_conversation_association",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795456600000,
+      "tag": "0009_isolated_dass21_technical_test",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795459385000,
+      "tag": "0010_technical_test_dass21_mapping",
+      "breakpoints": true
     }
   ]
 }

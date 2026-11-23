@@ -12,6 +12,7 @@ import { assessmentAnswers, assessmentInstrumentQuestions, assessmentInstrumentV
 import { DrizzleDass21QuestionMappingRepository } from '../../src/modules/preliminary-assessment/infrastructure/persistence/drizzle-dass21-question-mapping-repository.js';
 import { DrizzleDass21AssessmentScoreRepository } from '../../src/modules/preliminary-assessment/infrastructure/persistence/drizzle-dass21-assessment-score-repository.js';
 import { ScoreCompletedDass21Assessment } from '../../src/modules/preliminary-assessment/application/internal/command-services/score-completed-dass21-assessment.js';
+import { DrizzleDass21InternalResultReadUnitOfWork } from '../../src/modules/preliminary-assessment/infrastructure/persistence/drizzle-dass21-internal-result-read-unit-of-work.js';
 import { ConsentAssessmentAuthorizer } from '../../src/modules/preliminary-assessment/infrastructure/persistence/consent-assessment-authorizer.js';
 import { DrizzlePreliminaryAssessmentRepository } from '../../src/modules/preliminary-assessment/infrastructure/persistence/drizzle-preliminary-assessment-repository.js';
 import { DrizzleAssessmentResponseRepository } from '../../src/modules/preliminary-assessment/infrastructure/persistence/drizzle-assessment-response-repository.js';
@@ -362,6 +363,125 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
     const events = await db.select({ action: accountConsentEvents.action }).from(accountConsentEvents)
       .where(eq(accountConsentEvents.accountId, ownerId)).orderBy(accountConsentEvents.sequence);
     expect(events.at(-1)?.action).toBe('withdrawn');
+  });
+
+  it('holds a coherent internal result read ahead of concurrent withdrawal and notice supersession', async () => {
+    const ownerId = await account();
+    const noticeId = await grant(ownerId);
+    const instrument = await approvedSyntheticInstrument();
+    const mapping = await frozenMapping(instrument);
+    const { completed, score } = await assessmentWithScore(ownerId, noticeId, instrument, mapping);
+    await new DrizzleDass21AssessmentScoreRepository(db).saveForCompletedOwner(score, ownerId);
+
+    const readUnit = new DrizzleDass21InternalResultReadUnitOfWork(db);
+    const releaseBarriers: Array<() => void> = [];
+    const lockRead = () => {
+      let signalReadLocks!: () => void;
+      let releaseRead!: () => void;
+      const readLocksAcquired = new Promise<void>(resolve => { signalReadLocks = resolve; });
+      const holdRead = new Promise<void>(resolve => { releaseRead = resolve; });
+      releaseBarriers.push(releaseRead);
+      const read = readUnit.execute(async session => {
+        const lockedNotice = await session.requireCurrentConsentNotice(ownerId, new Date());
+        expect(lockedNotice).toBe(noticeId);
+        const assessment = await session.findAssessmentForOwner(completed.assessmentId, ownerId);
+        expect(assessment?.status).toBe('completed');
+        const lockedInstrument = await session.findAvailableInstrumentVersion(instrument.instrumentVersionId, new Date());
+        expect(lockedInstrument?.instrumentVersionId).toBe(instrument.instrumentVersionId);
+        const lockedScore = await session.findScoreForOwner(completed.assessmentId, ownerId);
+        expect(lockedScore?.assessmentId).toBe(completed.assessmentId);
+        const lockedMapping = await session.findFrozenMapping(instrument.instrumentVersionId, mapping.mappingVersion, instrument);
+        expect(lockedMapping?.mappingId).toBe(mapping.mappingId);
+        signalReadLocks();
+        await holdRead;
+        return 'read_completed_under_locks';
+      });
+      return { read, readLocksAcquired, releaseRead };
+    };
+
+    const replacementContent = 'Synthetic rollback-only notice replacement; not legal text.';
+    const replacementId = randomUUID();
+    await db.insert(consentNoticeVersions).values({
+      id: replacementId, purpose: 'preliminary_assessment', version: `rollback-${randomUUID().slice(0, 12)}`,
+      content: replacementContent, contentHash: createHash('sha256').update(replacementContent).digest('hex'),
+      effectiveAt: new Date(Date.now() - 60_000), status: 'draft',
+    });
+    draftNoticeIds.add(replacementId);
+
+    let publisher: import('pg').PoolClient | undefined;
+    const pending: Promise<unknown>[] = [];
+    const waitForBlockedQuery = async (fragment: string): Promise<void> => {
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline) {
+        const observer = noticeLock?.observer;
+        if (!observer) throw new Error('DASS-21 integration advisory lock is not held');
+        const blocked = await observer.query<{ pid: number }>(
+          `SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()
+           AND wait_event_type = 'Lock' AND query ILIKE $1 LIMIT 1`, [`%${fragment}%`],
+        );
+        if (blocked.rows.length > 0) return;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      throw new Error(`Timed out waiting for synthetic ${fragment} lock`);
+    };
+    try {
+      // Keep the two writers in separate phases. If a publisher transaction updates
+      // the notice and stays open while this test awaits withdrawal, withdrawal's
+      // notice read waits on the publisher while the test waits on withdrawal.
+      // Phase 1: withdrawal waits on the account lock, then commits after the read.
+      const withdrawalRead = lockRead();
+      pending.push(withdrawalRead.read);
+      await withdrawalRead.readLocksAcquired;
+      const withdrawal = new DrizzleConsentRepository(db).recordDecision(
+        ownerId, 'preliminary_assessment', noticeId, 'withdrawn', randomUUID(), new Date(),
+      );
+      pending.push(withdrawal);
+      await waitForBlockedQuery('FOR UPDATE');
+      withdrawalRead.releaseRead();
+      await expect(withdrawalRead.read).resolves.toBe('read_completed_under_locks');
+      await expect(withdrawal).resolves.toMatchObject({ action: 'withdrawn' });
+      await expect(readUnit.execute(session => session.requireCurrentConsentNotice(ownerId, new Date())))
+        .rejects.toMatchObject({ code: 'consent_required' });
+
+      // Restore consent for a separate, non-overlapping supersession ordering check.
+      const renewed = await new DrizzleConsentRepository(db).recordDecision(
+        ownerId, 'preliminary_assessment', noticeId, 'granted', randomUUID(), new Date(),
+      );
+      expect(renewed?.action).toBe('granted');
+
+      // Phase 2: notice replacement waits on the notice lock, then is rolled back after the read.
+      const replacementRead = lockRead();
+      pending.push(replacementRead.read);
+      await replacementRead.readLocksAcquired;
+      publisher = await pool.connect();
+      await publisher.query('BEGIN');
+      const replacementUpdate = publisher.query(
+        'UPDATE consent_notice_versions SET status = $1 WHERE id = $2', ['superseded', noticeId],
+      );
+      pending.push(replacementUpdate);
+      await waitForBlockedQuery('UPDATE consent_notice_versions');
+      replacementRead.releaseRead();
+      await expect(replacementRead.read).resolves.toBe('read_completed_under_locks');
+      await replacementUpdate;
+      await publisher.query('UPDATE consent_notice_versions SET status = $1 WHERE id = $2', ['published', replacementId]);
+      await publisher.query('ROLLBACK');
+    } finally {
+      // Release every test barrier before waiting for transactions or returning clients.
+      // These guards are idempotent so cleanup also works after an assertion failure.
+      for (const release of releaseBarriers) release();
+      if (publisher) {
+        try { await publisher.query('ROLLBACK'); } catch { /* transaction may already have rolled back */ }
+        publisher.release();
+      }
+      await Promise.allSettled(pending);
+    }
+    const [replacement] = await db.select({ status: consentNoticeVersions.status }).from(consentNoticeVersions)
+      .where(eq(consentNoticeVersions.id, replacementId));
+    expect(replacement?.status).toBe('draft');
+    const [originalNotice] = await db.select({ status: consentNoticeVersions.status }).from(consentNoticeVersions)
+      .where(eq(consentNoticeVersions.id, noticeId));
+    expect(originalNotice?.status).toBe('published');
+    expect(await db.select().from(assessmentPsychometricScores).where(eq(assessmentPsychometricScores.assessmentId, completed.assessmentId))).toHaveLength(1);
   });
 
   it('rejects a question reference not registered under the mapped instrument version at PostgreSQL FK', async () => {

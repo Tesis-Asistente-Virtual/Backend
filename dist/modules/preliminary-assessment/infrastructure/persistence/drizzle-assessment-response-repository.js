@@ -4,6 +4,7 @@ import { assessmentResponseSchema, validateResponseForInstrument } from '../../d
 import { isInstrumentAvailable, parseInstrumentVersion } from '../../domain/model/instrument.js';
 import { assessmentAnswers, assessmentInstrumentQuestions, assessmentInstrumentVersions, preliminaryAssessments } from './schema.js';
 import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 function toDomain(row) {
     const parsed = assessmentResponseSchema.safeParse({
         assessmentId: row.assessmentId,
@@ -20,8 +21,12 @@ function toDomain(row) {
 }
 export class DrizzleAssessmentResponseRepository {
     db;
-    constructor(db) {
+    availability;
+    technicalTestInstrumentVersionId;
+    constructor(db, availability = instrument => isInstrumentAvailable(instrument), technicalTestInstrumentVersionId) {
         this.db = db;
+        this.availability = availability;
+        this.technicalTestInstrumentVersionId = technicalTestInstrumentVersionId;
     }
     async saveForOwner(responseValue, accountId) {
         const parsed = assessmentResponseSchema.safeParse(responseValue);
@@ -29,6 +34,7 @@ export class DrizzleAssessmentResponseRepository {
             throw new PreliminaryAssessmentError('invalid_response');
         const response = parsed.data;
         await this.db.transaction(async (tx) => {
+            await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, response.instrumentVersionId);
             // Consent uses account -> notice lock ordering. Acquire both before the assessment row.
             const currentNoticeId = await requireCurrentPreliminaryAssessmentConsent(tx, accountId, undefined, response.updatedAt);
             const [assessment] = await tx.select().from(preliminaryAssessments).where(and(eq(preliminaryAssessments.assessmentId, response.assessmentId), eq(preliminaryAssessments.accountId, accountId))).for('update').limit(1);
@@ -59,7 +65,7 @@ export class DrizzleAssessmentResponseRepository {
                 approval: { status: instrumentRow.approvalStatus, approvedAt: instrumentRow.approvedAt, approvalReference: instrumentRow.approvalReference },
                 license: { status: instrumentRow.licenseStatus, reference: instrumentRow.licenseReference },
             });
-            if (!isInstrumentAvailable(instrument))
+            if (!this.availability(instrument, response.updatedAt))
                 throw new PreliminaryAssessmentError('instrument_unavailable');
             validateResponseForInstrument(response, instrument);
             await tx.insert(assessmentAnswers).values({

@@ -28,9 +28,9 @@ export const dass21QuestionMappingSchema = z.object({
     }
 });
 /** Validates a UUID-to-item map against one specific approved instrument version. */
-export function validateDass21QuestionMapping(mappingValue, instrument) {
+export function validateDass21QuestionMapping(mappingValue, instrument, availability = value => isInstrumentAvailable(value), at = new Date()) {
     const parsed = dass21QuestionMappingSchema.safeParse(mappingValue);
-    if (!parsed.success || !isInstrumentAvailable(instrument))
+    if (!parsed.success || !availability(instrument, at))
         throw new Dass21ScoringError('invalid_instrument');
     const mapping = parsed.data;
     if (mapping.instrumentId !== instrument.instrumentId || mapping.instrumentVersionId !== instrument.instrumentVersionId) {

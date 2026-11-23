@@ -115,15 +115,15 @@ export function expireAssessment(assessment, at) {
         throw new PreliminaryAssessmentError('invalid_transition');
     return transition(assessment, 'expired', at);
 }
-export function recordAssessmentResponse(assessment, responseValue, instrument) {
+export function recordAssessmentResponse(assessment, responseValue, instrument, availability = instrumentValue => isInstrumentAvailable(instrumentValue)) {
     if (assessment.status !== 'in_progress')
         throw new PreliminaryAssessmentError('assessment_closed');
     if (assessment.instrumentVersionId === null || assessment.instrumentVersionId !== instrument.instrumentVersionId) {
         throw new PreliminaryAssessmentError('instrument_version_mismatch');
     }
-    if (!isInstrumentAvailable(instrument))
-        throw new PreliminaryAssessmentError('instrument_unavailable');
     const response = validateResponseForInstrument(responseValue, instrument);
+    if (!availability(instrument, response.updatedAt))
+        throw new PreliminaryAssessmentError('instrument_unavailable');
     if (response.assessmentId !== assessment.assessmentId)
         throw new PreliminaryAssessmentError('invalid_response');
     if (response.updatedAt < assessment.updatedAt)
@@ -131,7 +131,7 @@ export function recordAssessmentResponse(assessment, responseValue, instrument) 
     const responses = upsertAssessmentResponse(assessment.responses, response);
     return freezeAssessment({ ...assessment, responses, updatedAt: response.updatedAt });
 }
-export function completeAssessment(assessment, at, instrument) {
+export function completeAssessment(assessment, at, instrument, availability = instrumentValue => isInstrumentAvailable(instrumentValue)) {
     if (assessment.status === 'completed')
         return assessment;
     if (assessment.status !== 'in_progress')
@@ -140,7 +140,7 @@ export function completeAssessment(assessment, at, instrument) {
         if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId) {
             throw new PreliminaryAssessmentError('instrument_version_mismatch');
         }
-        if (!isInstrumentAvailable(instrument))
+        if (!availability(instrument, at))
             throw new PreliminaryAssessmentError('instrument_unavailable');
         const requiredIds = instrument.questions.filter(question => question.required).map(question => question.id);
         const answeredIds = new Set(assessment.responses.filter(response => response.status === 'answered').map(response => response.questionId));

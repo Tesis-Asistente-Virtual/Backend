@@ -9,6 +9,7 @@ import { restorePreliminaryAssessment, type PreliminaryAssessment } from '../../
 import type { PreliminaryAssessmentRepository } from '../../domain/repositories/preliminary-assessment-repository.js';
 import { assessmentAnswers, assessmentResults, preliminaryAssessments } from './schema.js';
 import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 
 type AssessmentRow = typeof preliminaryAssessments.$inferSelect;
 type AnswerRow = typeof assessmentAnswers.$inferSelect;
@@ -63,12 +64,18 @@ function assessmentValues(assessment: PreliminaryAssessment) {
 }
 
 export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssessmentRepository {
-  constructor(private readonly db: NodePgDatabase<typeof schema>) {}
+  constructor(
+    private readonly db: NodePgDatabase<typeof schema>,
+    private readonly technicalTestInstrumentVersionId?: string,
+  ) {}
 
   async create(assessment: PreliminaryAssessment): Promise<void> {
     const valid = restorePreliminaryAssessment(assessment);
     if (valid.status !== 'in_progress' || valid.responses.length > 0) throw new PreliminaryAssessmentError('invalid_assessment');
     await this.db.transaction(async tx => {
+      // This transaction-local capability is only injected by the isolated
+      // technical-test composition and is constrained to its fixed candidate.
+      await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, valid.instrumentVersionId);
       await requireCurrentPreliminaryAssessmentConsent(tx, valid.accountId, valid.consentNoticeVersionId, valid.startedAt);
       await tx.insert(preliminaryAssessments).values(assessmentValues(valid));
     });
@@ -110,6 +117,7 @@ export class DrizzlePreliminaryAssessmentRepository implements PreliminaryAssess
     const valid = restorePreliminaryAssessment(assessment);
     if (valid.accountId !== accountId || valid.status === 'completed' || valid.updatedAt <= expectedUpdatedAt) return false;
     return this.db.transaction(async tx => {
+      await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, valid.instrumentVersionId);
       if (valid.status === 'in_progress' || valid.status === 'paused') {
         await requireCurrentPreliminaryAssessmentConsent(tx, accountId, valid.consentNoticeVersionId, valid.updatedAt);
       }

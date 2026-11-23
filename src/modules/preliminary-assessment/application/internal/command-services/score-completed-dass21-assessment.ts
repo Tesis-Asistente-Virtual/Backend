@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { PreliminaryAssessmentError } from '../../../domain/model/assessment-errors.js';
 import { createDass21AssessmentScore, type Dass21AssessmentScore } from '../../../domain/model/dass21-assessment-score.js';
 import { Dass21ScoringError } from '../../../domain/model/dass21-scoring.js';
+import { isInstrumentAvailable, type InstrumentAvailabilityPolicy } from '../../../domain/model/instrument.js';
 import type { Dass21QuestionMappingRepository } from '../../../domain/repositories/dass21-question-mapping-repository.js';
 import type { Dass21AssessmentScoreRepository } from '../../../domain/repositories/dass21-assessment-score-repository.js';
 import type { InstrumentCatalog } from '../../../domain/repositories/instrument-catalog.js';
@@ -28,6 +29,8 @@ export class ScoreCompletedDass21Assessment {
     private readonly scores: Dass21AssessmentScoreRepository,
     private readonly consent: PreliminaryAssessmentConsentAuthorizer,
     private readonly clock: () => Date = () => new Date(),
+    private readonly availability: InstrumentAvailabilityPolicy = instrument => isInstrumentAvailable(instrument),
+    private readonly technicalTestOnly = false,
   ) {}
 
   async execute(accountId: string, commandValue: ScoreCompletedDass21AssessmentCommand): Promise<Dass21AssessmentScore> {
@@ -46,7 +49,7 @@ export class ScoreCompletedDass21Assessment {
 
     const now = this.clock();
     const instrument = await this.instruments.findAvailableByVersionId(assessment.instrumentVersionId, now);
-    if (!instrument) throw new PreliminaryAssessmentError('instrument_unavailable');
+    if (!instrument || !this.availability(instrument, now)) throw new PreliminaryAssessmentError('instrument_unavailable');
     if (instrument.instrumentVersionId !== assessment.instrumentVersionId) throw new PreliminaryAssessmentError('instrument_version_mismatch');
 
     const mapping = await this.mappings.findFrozen(assessment.instrumentVersionId, command.mappingVersion);
@@ -61,7 +64,11 @@ export class ScoreCompletedDass21Assessment {
     if (assessment.consentNoticeVersionId !== calculationNoticeId) throw new PreliminaryAssessmentError('consent_required');
 
     const calculatedAt = new Date(Math.max(now.getTime(), assessment.completedAt?.getTime() ?? 0));
-    const score = createDass21AssessmentScore({ assessment, instrument, mapping, calculatedAt });
+    const score = createDass21AssessmentScore({
+      assessment, instrument, mapping, calculatedAt,
+      availability: this.availability,
+      technicalTestOnly: this.technicalTestOnly,
+    });
     return this.scores.saveForCompletedOwner(score, accountId);
   }
 

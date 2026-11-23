@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 /** Version of the deterministic subscale sum and DASS-21 x2 conversion rules. */
 export const DASS21_SCORING_VERSION = 'dass21-score-1.0' as const;
+export const DASS21_TECHNICAL_TEST_INSTRUMENT_ID = '00000000-0000-4000-8000-000000008a91' as const;
+export const DASS21_TECHNICAL_TEST_VERSION_ID = '00000000-0000-4000-8000-000000008a92' as const;
+export const DASS21_TECHNICAL_TEST_VERSION = 'dass21-spanish-candidate-1.1' as const;
 
 const instrumentMetadataSchema = z.object({
   instrumentCode: z.literal('DASS-21'),
@@ -64,14 +67,20 @@ export const DASS21_ITEMS_BY_DIMENSION = Object.freeze({
  * function is not wired to HTTP or persistence until an approved instrument
  * version can provide and validate that mapping.
  */
-export function scoreDass21(value: {
+function scoreDass21Core(value: {
   instrument: unknown;
   answers: unknown;
-}): Dass21Score {
+}, authorization: 'approved' | 'synthetic_technical_test'): Dass21Score {
   const instrument = instrumentMetadataSchema.safeParse(value.instrument);
   if (!instrument.success) throw new Dass21ScoringError('invalid_instrument');
-  if (instrument.data.status !== 'approved' || instrument.data.approvalStatus !== 'approved' ||
-      !['authorized', 'not_applicable'].includes(instrument.data.licenseStatus)) {
+  const isApproved = instrument.data.status === 'approved' && instrument.data.approvalStatus === 'approved' &&
+    ['authorized', 'not_applicable'].includes(instrument.data.licenseStatus);
+  const isExactSyntheticCandidate = authorization === 'synthetic_technical_test' &&
+    instrument.data.instrumentId === DASS21_TECHNICAL_TEST_INSTRUMENT_ID &&
+    instrument.data.instrumentVersionId === DASS21_TECHNICAL_TEST_VERSION_ID &&
+    instrument.data.version === DASS21_TECHNICAL_TEST_VERSION && instrument.data.status === 'draft' &&
+    instrument.data.approvalStatus === 'pending' && instrument.data.licenseStatus === 'not_reviewed';
+  if (!isApproved && !isExactSyntheticCandidate) {
     throw new Dass21ScoringError('instrument_not_approved');
   }
 
@@ -107,4 +116,14 @@ export function scoreDass21(value: {
     instrumentVersionId: instrument.data.instrumentVersionId,
     dimensions,
   });
+}
+
+/** Normal scoring entry point: only approved and licensed instrument versions are accepted. */
+export function scoreDass21(value: { instrument: unknown; answers: unknown }): Dass21Score {
+  return scoreDass21Core(value, 'approved');
+}
+
+/** Explicit technical-test entry point, restricted to the single pending synthetic candidate above. */
+export function scoreDass21ForSyntheticTechnicalTest(value: { instrument: unknown; answers: unknown }): Dass21Score {
+  return scoreDass21Core(value, 'synthetic_technical_test');
 }

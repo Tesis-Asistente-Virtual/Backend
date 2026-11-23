@@ -2,12 +2,15 @@ import { isInstrumentAvailable, toPublicInstrumentQuestion } from '../../../doma
 export class GetAssessmentInfo {
     instruments;
     clock;
-    constructor(instruments, clock = () => new Date()) {
+    availability;
+    constructor(instruments, clock = () => new Date(), availability = instrument => isInstrumentAvailable(instrument)) {
         this.instruments = instruments;
         this.clock = clock;
+        this.availability = availability;
     }
     async execute() {
-        const available = (await this.instruments.listAvailable(100, 0, this.clock())).filter(isInstrumentAvailable);
+        const now = this.clock();
+        const available = (await this.instruments.listAvailable(100, 0, now)).filter(instrument => this.availability(instrument, now));
         return {
             assessmentAvailable: available.length > 0,
             mode: 'structured_instrument',

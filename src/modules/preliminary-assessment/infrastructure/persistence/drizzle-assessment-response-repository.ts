@@ -3,10 +3,11 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
 import { PreliminaryAssessmentError } from '../../domain/model/assessment-errors.js';
 import { assessmentResponseSchema, validateResponseForInstrument, type AssessmentResponse } from '../../domain/model/assessment-response.js';
-import { isInstrumentAvailable, parseInstrumentVersion } from '../../domain/model/instrument.js';
+import { isInstrumentAvailable, parseInstrumentVersion, type InstrumentAvailabilityPolicy } from '../../domain/model/instrument.js';
 import type { AssessmentResponseRepository } from '../../domain/repositories/assessment-response-repository.js';
 import { assessmentAnswers, assessmentInstrumentQuestions, assessmentInstrumentVersions, preliminaryAssessments } from './schema.js';
 import { requireCurrentPreliminaryAssessmentConsent } from './preliminary-assessment-consent-transaction.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 
 function toDomain(row: typeof assessmentAnswers.$inferSelect): AssessmentResponse {
   const parsed = assessmentResponseSchema.safeParse({
@@ -23,13 +24,18 @@ function toDomain(row: typeof assessmentAnswers.$inferSelect): AssessmentRespons
 }
 
 export class DrizzleAssessmentResponseRepository implements AssessmentResponseRepository {
-  constructor(private readonly db: NodePgDatabase<typeof schema>) {}
+  constructor(
+    private readonly db: NodePgDatabase<typeof schema>,
+    private readonly availability: InstrumentAvailabilityPolicy = instrument => isInstrumentAvailable(instrument),
+    private readonly technicalTestInstrumentVersionId?: string,
+  ) {}
 
   async saveForOwner(responseValue: AssessmentResponse, accountId: string): Promise<void> {
     const parsed = assessmentResponseSchema.safeParse(responseValue);
     if (!parsed.success) throw new PreliminaryAssessmentError('invalid_response');
     const response = parsed.data;
     await this.db.transaction(async tx => {
+      await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, response.instrumentVersionId);
       // Consent uses account -> notice lock ordering. Acquire both before the assessment row.
       const currentNoticeId = await requireCurrentPreliminaryAssessmentConsent(tx, accountId, undefined, response.updatedAt);
       const [assessment] = await tx.select().from(preliminaryAssessments).where(and(
@@ -62,7 +68,7 @@ export class DrizzleAssessmentResponseRepository implements AssessmentResponseRe
         approval: { status: instrumentRow.approvalStatus, approvedAt: instrumentRow.approvedAt, approvalReference: instrumentRow.approvalReference },
         license: { status: instrumentRow.licenseStatus, reference: instrumentRow.licenseReference },
       });
-      if (!isInstrumentAvailable(instrument)) throw new PreliminaryAssessmentError('instrument_unavailable');
+      if (!this.availability(instrument, response.updatedAt)) throw new PreliminaryAssessmentError('instrument_unavailable');
       validateResponseForInstrument(response, instrument);
 
       await tx.insert(assessmentAnswers).values({

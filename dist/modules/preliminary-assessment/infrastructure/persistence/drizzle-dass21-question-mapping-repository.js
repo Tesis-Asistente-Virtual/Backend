@@ -1,8 +1,9 @@
 import { and, eq } from 'drizzle-orm';
-import { parseInstrumentVersion } from '../../domain/model/instrument.js';
+import { isInstrumentAvailable, parseInstrumentVersion } from '../../domain/model/instrument.js';
 import { Dass21ScoringError } from '../../domain/model/dass21-scoring.js';
 import { freezeDass21QuestionMapping, validateDass21QuestionMapping } from '../../domain/model/dass21-question-mapping.js';
 import { assessmentInstrumentQuestions, assessmentInstrumentVersions, assessmentScoringItemMappings, assessmentScoringMappingVersions } from './schema.js';
+import { enableTechnicalTestDraftForVersion } from './technical-test-draft-authorization.js';
 function toMapping(row, items) {
     return {
         schemaVersion: '1.0', mappingId: row.mappingId, instrumentCode: 'DASS-21', instrumentId: row.instrumentId,
@@ -30,8 +31,12 @@ async function readInstrument(executor, instrumentVersionId) {
 }
 export class DrizzleDass21QuestionMappingRepository {
     db;
-    constructor(db) {
+    availability;
+    technicalTestInstrumentVersionId;
+    constructor(db, availability = instrument => isInstrumentAvailable(instrument), technicalTestInstrumentVersionId) {
         this.db = db;
+        this.availability = availability;
+        this.technicalTestInstrumentVersionId = technicalTestInstrumentVersionId;
     }
     async saveDraft(mappingValue) {
         if (mappingValue.status !== 'draft' || mappingValue.frozenAt !== null)
@@ -43,7 +48,7 @@ export class DrizzleDass21QuestionMappingRepository {
             if (!instrumentRow)
                 throw new Dass21ScoringError('invalid_instrument');
             const instrument = await readInstrument(tx, mappingValue.instrumentVersionId);
-            const mapping = validateDass21QuestionMapping(mappingValue, instrument);
+            const mapping = validateDass21QuestionMapping(mappingValue, instrument, this.availability, mappingValue.createdAt);
             await tx.insert(assessmentScoringMappingVersions).values({
                 mappingId: mapping.mappingId, instrumentId: mapping.instrumentId, instrumentVersionId: mapping.instrumentVersionId,
                 mappingVersion: mapping.mappingVersion, status: 'draft', createdAt: mapping.createdAt, frozenAt: null,
@@ -68,8 +73,9 @@ export class DrizzleDass21QuestionMappingRepository {
             const items = await tx.select().from(assessmentScoringItemMappings).where(eq(assessmentScoringItemMappings.mappingId, mappingId));
             const mapping = toMapping(row, items);
             const instrument = await readInstrument(tx, instrumentVersionId);
-            const valid = validateDass21QuestionMapping(mapping, instrument);
-            const frozen = freezeDass21QuestionMapping(valid, frozenAt);
+            const authorized = validateDass21QuestionMapping(mapping, instrument, this.availability, frozenAt);
+            const frozen = freezeDass21QuestionMapping(authorized, frozenAt);
+            await enableTechnicalTestDraftForVersion(tx, this.technicalTestInstrumentVersionId, instrumentVersionId);
             const [updated] = await tx.update(assessmentScoringMappingVersions).set({ status: 'frozen', frozenAt })
                 .where(and(eq(assessmentScoringMappingVersions.mappingId, mappingId), eq(assessmentScoringMappingVersions.status, 'draft')))
                 .returning();
@@ -90,6 +96,6 @@ export class DrizzleDass21QuestionMappingRepository {
             this.db.select().from(assessmentScoringItemMappings).where(eq(assessmentScoringItemMappings.mappingId, row.mappingId)),
             readInstrument(this.db, instrumentVersionId),
         ]);
-        return validateDass21QuestionMapping(toMapping(row, items), instrument);
+        return validateDass21QuestionMapping(toMapping(row, items), instrument, this.availability, new Date());
     }
 }

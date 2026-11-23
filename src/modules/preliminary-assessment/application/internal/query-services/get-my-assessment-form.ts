@@ -1,5 +1,5 @@
 import { PreliminaryAssessmentError } from '../../../domain/model/assessment-errors.js';
-import { isInstrumentAvailable, toPublicInstrumentQuestion } from '../../../domain/model/instrument.js';
+import { isInstrumentAvailable, toPublicInstrumentQuestion, type InstrumentAvailabilityPolicy } from '../../../domain/model/instrument.js';
 import type { InstrumentCatalog } from '../../../domain/repositories/instrument-catalog.js';
 import type { PreliminaryAssessmentRepository } from '../../../domain/repositories/preliminary-assessment-repository.js';
 import type { PreliminaryAssessmentConsentAuthorizer } from '../../ports/preliminary-assessment-consent-authorizer.js';
@@ -11,6 +11,7 @@ export class GetMyAssessmentForm {
     private readonly instruments: InstrumentCatalog,
     private readonly consent: PreliminaryAssessmentConsentAuthorizer,
     private readonly clock: () => Date = () => new Date(),
+    private readonly availability: InstrumentAvailabilityPolicy = instrument => isInstrumentAvailable(instrument),
   ) {}
 
   async execute(assessmentId: string, accountId: string) {
@@ -23,7 +24,7 @@ export class GetMyAssessmentForm {
     await this.assertCurrentConsent(assessment.accountId, assessment.consentNoticeVersionId);
 
     const instrument = await this.instruments.findAvailableByVersionId(assessment.instrumentVersionId, this.clock());
-    if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId || !isInstrumentAvailable(instrument)) {
+    if (!instrument || instrument.instrumentVersionId !== assessment.instrumentVersionId || !this.availability(instrument, this.clock())) {
       throw new PreliminaryAssessmentError('instrument_unavailable');
     }
 

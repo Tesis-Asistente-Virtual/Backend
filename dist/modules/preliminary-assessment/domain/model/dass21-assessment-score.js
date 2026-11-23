@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { assessmentResponseSchema } from './assessment-response.js';
+import { isInstrumentAvailable } from './instrument.js';
 import { PreliminaryAssessmentError } from './assessment-errors.js';
-import { Dass21ScoringError, scoreDass21 } from './dass21-scoring.js';
+import { Dass21ScoringError, scoreDass21, scoreDass21ForSyntheticTechnicalTest } from './dass21-scoring.js';
 import { validateDass21QuestionMapping } from './dass21-question-mapping.js';
 const dimensionsSchema = z.object({
     depression: z.object({ rawScore: z.number().int().min(0).max(21), equivalentScore: z.number().int().min(0).max(42) }).strict(),
@@ -56,7 +57,8 @@ export function createDass21AssessmentScore(input) {
         Number.isNaN(input.calculatedAt.getTime()) || !assessment.completedAt || input.calculatedAt < assessment.completedAt) {
         throw new Dass21ScoringError('invalid_answers');
     }
-    const mapping = validateDass21QuestionMapping(input.mapping, instrument);
+    const availability = input.availability ?? (value => isInstrumentAvailable(value));
+    const mapping = validateDass21QuestionMapping(input.mapping, instrument, availability, input.calculatedAt);
     const responseByQuestion = new Map();
     for (const responseValue of assessment.responses) {
         const parsedResponse = assessmentResponseSchema.safeParse(responseValue);
@@ -94,7 +96,7 @@ export function createDass21AssessmentScore(input) {
             throw new Dass21ScoringError('invalid_answers');
         return { instrumentVersionId: response.instrumentVersionId, itemNumber: entry.itemNumber, value };
     });
-    const score = scoreDass21({
+    const scoreInput = {
         instrument: {
             instrumentCode: 'DASS-21',
             instrumentId: instrument.instrumentId,
@@ -105,7 +107,10 @@ export function createDass21AssessmentScore(input) {
             licenseStatus: instrument.license.status,
         },
         answers,
-    });
+    };
+    const score = input.technicalTestOnly
+        ? scoreDass21ForSyntheticTechnicalTest(scoreInput)
+        : scoreDass21(scoreInput);
     return dass21AssessmentScoreSchema.parse({
         schemaVersion: '1.0', status: 'calculated', assessmentId: assessment.assessmentId,
         accountId: assessment.accountId, instrumentCode: 'DASS-21', instrumentId: instrument.instrumentId,

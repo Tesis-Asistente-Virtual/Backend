@@ -94,6 +94,9 @@ export type InstrumentVersion = z.infer<typeof instrumentVersionSchema>;
 export type InstrumentId = string;
 export type InstrumentVersionId = string;
 
+/** Server-side availability rule injected by an application composition. */
+export type InstrumentAvailabilityPolicy = (instrument: InstrumentVersion, at: Date) => boolean;
+
 /** Projects an instrument question to its public form without internal scoring metadata. */
 export function toPublicInstrumentQuestion(question: InstrumentQuestion): PublicInstrumentQuestion {
   if ('options' in question) {

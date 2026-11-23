@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isInstrumentAvailable, type InstrumentVersion } from './instrument.js';
+import { isInstrumentAvailable, type InstrumentAvailabilityPolicy, type InstrumentVersion } from './instrument.js';
 import { Dass21ScoringError } from './dass21-scoring.js';
 
 const mapEntrySchema = z.object({ questionId: z.string().uuid(), itemNumber: z.number().int().min(1).max(21) }).strict();
@@ -36,9 +36,11 @@ export type Dass21QuestionMapping = z.infer<typeof dass21QuestionMappingSchema>;
 export function validateDass21QuestionMapping(
   mappingValue: unknown,
   instrument: InstrumentVersion,
+  availability: InstrumentAvailabilityPolicy = value => isInstrumentAvailable(value),
+  at: Date = new Date(),
 ): Dass21QuestionMapping {
   const parsed = dass21QuestionMappingSchema.safeParse(mappingValue);
-  if (!parsed.success || !isInstrumentAvailable(instrument)) throw new Dass21ScoringError('invalid_instrument');
+  if (!parsed.success || !availability(instrument, at)) throw new Dass21ScoringError('invalid_instrument');
   const mapping = parsed.data;
   if (mapping.instrumentId !== instrument.instrumentId || mapping.instrumentVersionId !== instrument.instrumentVersionId) {
     throw new Dass21ScoringError('instrument_version_mismatch');

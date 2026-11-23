@@ -4,6 +4,7 @@ import { PreliminaryAssessmentError } from '../../../domain/model/assessment-err
 import type { PreliminaryAssessmentRepository } from '../../../domain/repositories/preliminary-assessment-repository.js';
 import type { AssessmentResultRepository } from '../../../domain/repositories/assessment-result-repository.js';
 import type { InstrumentCatalog } from '../../../domain/repositories/instrument-catalog.js';
+import { isInstrumentAvailable, type InstrumentAvailabilityPolicy } from '../../../domain/model/instrument.js';
 import type { PreliminaryAssessmentConsentAuthorizer } from '../../ports/preliminary-assessment-consent-authorizer.js';
 
 export class CompletePreliminaryAssessment {
@@ -13,6 +14,7 @@ export class CompletePreliminaryAssessment {
     private readonly instruments: InstrumentCatalog,
     private readonly consent: PreliminaryAssessmentConsentAuthorizer,
     private readonly clock: () => Date = () => new Date(),
+    private readonly availability: InstrumentAvailabilityPolicy = instrument => isInstrumentAvailable(instrument),
   ) {}
 
   async execute(assessmentId: string, accountId: string) {
@@ -31,7 +33,7 @@ export class CompletePreliminaryAssessment {
       if (!instrument) throw new PreliminaryAssessmentError('instrument_unavailable');
     }
     const at = new Date(Math.max(this.clock().getTime(), current.updatedAt.getTime() + 1));
-    const completed = completeAssessment(current, at, instrument);
+    const completed = completeAssessment(current, at, instrument, this.availability);
     const result = createUnavailableAssessmentResult(completed.assessmentId, completed.instrumentVersionId, at);
     const saved = await this.assessments.completeWithResultForOwner(completed, result, accountId, current.updatedAt);
     if (!saved) {

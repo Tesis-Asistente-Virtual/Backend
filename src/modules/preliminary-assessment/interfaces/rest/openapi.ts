@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { assessmentAnswerSchema } from '../../domain/model/assessment-response.js';
 import { publicInstrumentQuestionSchema } from '../../domain/model/instrument.js';
+import { dass21ParticipantResultSchema } from './transformers/dass21-participant-result-transformer.js';
 import { startAssessmentBodySchema, submitAssessmentResponseBodySchema } from './validation/assessment-request-schemas.js';
 
 const toSchema = (value: z.ZodType) => z.toJSONSchema(value, { target: 'openapi-3.0' });
@@ -61,6 +62,10 @@ export const preliminaryAssessmentSchemas = {
   AssessmentResponseItem: toSchema(answerResource),
   AssessmentPage: pageSchema(assessmentResource),
   AssessmentResult: toSchema(resultResource),
+  Dass21ParticipantResultFuture: {
+    ...toSchema(dass21ParticipantResultSchema),
+    description: 'Contrato futuro preparado, no habilitado ni conectado a ninguna ruta. No usar como respuesta actual de /result.',
+  },
   AssessmentForm: {
     type: 'object', properties: {
       assessment: { $ref: '#/components/schemas/AssessmentResponse' },
@@ -171,7 +176,7 @@ export const preliminaryAssessmentPaths = {
   '/api/v1/preliminary-assessments/{id}/result': {
     get: {
       tags: ['Preliminary Assessment'], summary: 'Consultar resultado propio',
-      description: 'Puntuaciones, interpretación y prioridad se indican como no disponibles; el resultado no constituye diagnóstico.', security, parameters: [idParam],
+      description: 'Contrato actualmente disponible: AssessmentResult con puntuaciones, interpretación y prioridad not_available. No devuelve scores ni categorías DASS-21. Dass21ParticipantResultFuture es solo una especificación no habilitada y no describe la respuesta de esta ruta. El resultado actual no constituye diagnóstico.', security, parameters: [idParam],
       responses: { '200': response('Resultado orientativo no clínico', '#/components/schemas/AssessmentResult'), ...errorResponses(['401', '404', '500']) },
     },
   },
