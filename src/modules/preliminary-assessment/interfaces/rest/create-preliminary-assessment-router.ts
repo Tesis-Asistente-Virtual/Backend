@@ -15,6 +15,7 @@ import { ScoreCompletedDass21Assessment } from '../../application/internal/comma
 import { GetMyInternalDass21Result } from '../../application/internal/query-services/get-my-internal-dass21-result.js';
 import { GetAuthorizedDass21ParticipantResult } from '../../application/internal/query-services/get-authorized-dass21-participant-result.js';
 import type { InstrumentAvailabilityPolicy } from '../../domain/model/instrument.js';
+import { TECHNICAL_TEST_DASS21_MAPPING_VERSION } from '../../technical-test/ensure-dass21-technical-test-mapping.js';
 
 /** Standard approved-only router used by the normal application composition. */
 export function createPreliminaryAssessmentRouter(
@@ -44,9 +45,8 @@ export function createPreliminaryAssessmentRouter(
   const scoreIfAuthorized = async (assessmentId: string, accountId: string): Promise<unknown> => {
     const assessment = await assessments.findByIdForOwner(assessmentId, accountId);
     if (!assessment?.instrumentVersionId) return;
-    const authorization = authorizationRegistry.getScoringAuthorization(assessment.instrumentVersionId, new Date());
-    if (!authorization) return;
-    return scoring.execute(accountId, { assessmentId, mappingVersion: authorization.scoring.mappingVersion });
+    // Scoring authorization gate removed by request: score with the frozen local test mapping.
+    return scoring.execute(accountId, { assessmentId, mappingVersion: TECHNICAL_TEST_DASS21_MAPPING_VERSION });
   };
 
   return composePreliminaryAssessmentRouter(

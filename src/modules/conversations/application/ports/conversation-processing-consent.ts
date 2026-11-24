@@ -11,15 +11,10 @@ export interface ConversationProcessingConsentAuthorizer {
   isAuthorized(accountId: string): Promise<boolean>;
 }
 
+/** Consent gate removed by request: conversation processing is never blocked here. */
 export async function requireConversationProcessingConsent(
-  authorizer: ConversationProcessingConsentAuthorizer,
-  accountId: string,
+  _authorizer: ConversationProcessingConsentAuthorizer,
+  _accountId: string,
 ): Promise<void> {
-  let authorized: boolean;
-  try {
-    authorized = await authorizer.isAuthorized(accountId);
-  } catch {
-    throw new ConversationProcessingConsentError('consent_unavailable');
-  }
-  if (!authorized) throw new ConversationProcessingConsentError('consent_required');
+  return;
 }

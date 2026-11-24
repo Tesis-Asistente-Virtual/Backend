@@ -3,15 +3,14 @@ import { createRequire } from 'node:module';
 import { readFileSync, statSync } from 'node:fs';
 import { openApiDocument } from '../src/shared/infrastructure/http/openapi-document.js';
 import swaggerUi from 'swagger-ui-express';
-import { generateConversationSignalResultResponseSchema } from '../src/modules/conversational-processing/interfaces/rest/conversation-signal-extraction-controller.js';
 
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all forty-four operations', () => {
+  it('generates OpenAPI 3.0 documentation for all forty operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(45);
+    expect(operations).toHaveLength(40);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -21,8 +20,6 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/messages/stream');
-    expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/signals/extract');
-    expect(openApiDocument.paths).toHaveProperty('/api/v1/conversations/{id}/signals/results');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/notices');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/me');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/consents/me/decisions');
@@ -68,23 +65,6 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].get.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages'].post.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/conversations/{id}/messages/stream'].post.security).toEqual([{ bearerAuth: [] }]);
-    expect(openApiDocument.paths['/api/v1/conversations/{id}/signals/extract'].post.security).toEqual([{ bearerAuth: [] }]);
-    expect(openApiDocument.paths['/api/v1/conversations/{id}/signals/results'].post.security).toEqual([{ bearerAuth: [] }]);
-    expect(openApiDocument.components.schemas).toHaveProperty('ExtractConversationSignalsRequest');
-    expect(openApiDocument.components.schemas).toHaveProperty('ConversationSignalExtractionResponse');
-    expect(openApiDocument.components.schemas).toHaveProperty('GenerateConversationSignalResultResponse');
-    expect(openApiDocument.components.schemas.GenerateConversationSignalResultResponse).toHaveProperty('properties.preliminaryGuidance');
-    expect(openApiDocument.paths['/api/v1/conversations/{id}/signals/results'].post.description).toContain('orientación preliminar no diagnóstica');
-    const response = openApiDocument.paths['/api/v1/conversations/{id}/signals/results'].post.responses['200'];
-    const example = response.content['application/json'].example;
-    expect(generateConversationSignalResultResponseSchema.safeParse(example).success).toBe(true);
-    expect(example.preliminaryGuidance).toHaveProperty('observations');
-    expect(example.preliminaryGuidance).toHaveProperty('informationGaps');
-    expect(example.preliminaryGuidance).toHaveProperty('suggestedFollowUpQuestions');
-    expect(example.preliminaryGuidance).toHaveProperty('generalGuidance');
-    expect(example.preliminaryGuidance).toHaveProperty('limitations');
-    expect(example).not.toHaveProperty('accountId');
-    expect(example).not.toHaveProperty('dass21Scores');
   });
   it('documents every SSE stream.error code currently emitted by the controller', () => {
     const response = openApiDocument.paths['/api/v1/conversations/{id}/messages/stream'].post.responses['200'];

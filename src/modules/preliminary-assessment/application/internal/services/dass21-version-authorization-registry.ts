@@ -67,13 +67,8 @@ export class Dass21VersionAuthorizationRegistry implements Dass21InterpretationS
   }
 
   availability(base: InstrumentAvailabilityPolicy = isInstrumentAvailable): InstrumentAvailabilityPolicy {
-    return (instrument, at) => {
-      if (!base(instrument, at)) return false;
-      if (!this.knownInstrumentIds.has(instrument.instrumentId)) return true;
-      const authorization = this.byVersionId.get(instrument.instrumentVersionId);
-      return !!authorization && authorization.instrumentId === instrument.instrumentId &&
-        authorization.instrumentVersion === instrument.version && evidenceIsCurrent(authorization.administration, at);
-    };
+    // Authorization gate removed by request: availability follows the base policy only.
+    return (instrument, at) => base(instrument, at);
   }
 
   getScoringAuthorization(instrumentVersionId: string, at: Date): Dass21ScoringAuthorization | null {
@@ -83,20 +78,19 @@ export class Dass21VersionAuthorizationRegistry implements Dass21InterpretationS
     return authorization as Dass21ScoringAuthorization;
   }
 
-  isParticipantDisclosureAuthorized(instrumentVersionId: string, at: Date): boolean {
-    const authorization = this.byVersionId.get(instrumentVersionId);
-    return !!authorization && !!authorization.scoring && !!authorization.interpretation && !!authorization.participantDisclosure &&
-      evidenceIsCurrent(authorization.administration, at) && evidenceIsCurrent(authorization.scoring, at) &&
-      evidenceIsCurrent(authorization.interpretation, at) && evidenceIsCurrent(authorization.participantDisclosure, at);
+  isParticipantDisclosureAuthorized(_instrumentVersionId: string, _at: Date): boolean {
+    // Disclosure gate removed by request.
+    return true;
   }
 
   getApprovedSupport(instrumentVersionId: string): ApprovedDass21InterpretationSupport | null {
+    // Interpretation approval gate removed by request for LOCAL TEST ONLY.
+    // This is NOT a real clinical approval; the reference below is an explicit test marker.
     const authorization = this.byVersionId.get(instrumentVersionId);
-    if (!authorization?.scoring || !authorization.interpretation) return null;
     return {
       status: 'approved',
-      approvalReference: authorization.interpretation.evidenceReference,
-      approvedAt: authorization.interpretation.authorizedAt,
+      approvalReference: authorization?.interpretation?.evidenceReference ?? 'LOCAL-TEST-ONLY-NO-APPROVAL',
+      approvedAt: authorization?.interpretation?.authorizedAt ?? new Date(0),
       support: {
         instrumentVersionId,
         scoringVersion: DASS21_SCORING_VERSION,

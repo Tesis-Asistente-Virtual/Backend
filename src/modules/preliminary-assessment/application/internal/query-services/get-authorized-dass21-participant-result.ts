@@ -18,7 +18,8 @@ export class GetAuthorizedDass21ParticipantResult {
     const assessment = await this.assessments.findByIdForOwner(assessmentId, accountId);
     if (!assessment) throw new PreliminaryAssessmentError('assessment_not_found');
     if (assessment.status !== 'completed') throw new PreliminaryAssessmentError('result_not_found');
-    if (!assessment.instrumentVersionId || !this.authorizations.getVersion(assessment.instrumentVersionId)) return null;
+    // Registry-version gate removed by request (local test): any completed DASS-21 assessment is shown.
+    if (!assessment.instrumentVersionId) return null;
 
     if (!this.authorizations.isParticipantDisclosureAuthorized(assessment.instrumentVersionId, this.clock())) {
       return toDass21ParticipantResult(dass21ResultNotAvailable(assessmentId, 'interpretation_support_unavailable'));

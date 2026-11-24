@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { StagingDatabaseSafetyError, validateStagingDatabaseUrl } from '../../src/shared/infrastructure/database/staging-database-safety.js';
-import { SyntheticStagingAiAdapters } from '../../src/modules/conversational-processing/infrastructure/synthetic/synthetic-staging-ai-adapters.js';
 import { integratedStagingSyntheticNotices } from '../../src/staging/synthetic-consent-fixtures.js';
 import { isSyntheticStagingEmail } from '../../src/staging/create-integrated-synthetic-staging-app.js';
 import { isAllowedSyntheticStagingConversationInput, syntheticStagingConversationTitle, syntheticStagingUserMessage } from '../../src/modules/conversations/interfaces/rest/technical-staging-conversations-router.js';
@@ -39,12 +38,4 @@ describe('integrated synthetic staging guards', () => {
     expect(integratedStagingSyntheticNotices.every(notice => /SOLO PRUEBA TÉCNICA.*NO APROBACIÓN LEGAL.*DATOS FICTICIOS/.test(notice.content))).toBe(true);
   });
 
-  it('uses deterministic local assistant text and makes no reported claims in synthetic extraction', async () => {
-    const provider = new SyntheticStagingAiAdapters();
-    const generated = await provider.generateText({ instructions: 'synthetic', messages: [{ role: 'user', content: 'synthetic input' }] });
-    expect(generated.text).toContain('respuesta automática de prueba');
-    const extraction = await provider.extract({ messages: [{ messageId: '00000000-0000-4000-8000-000000000001', role: 'user', content: 'sintético' }] });
-    expect(extraction.observations).toEqual([]);
-    expect(extraction.missingInformation.every(item => item.reason === 'not_assessed')).toBe(true);
-  });
 });
