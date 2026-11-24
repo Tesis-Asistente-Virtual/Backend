@@ -39,8 +39,8 @@ export function assertDass21ScoreWriteAuthorization(input) {
         throw new PreliminaryAssessmentError('assessment_closed');
     if (assessment.instrumentVersionId !== score.instrumentVersionId)
         throw new PreliminaryAssessmentError('instrument_version_mismatch');
-    if (!input.currentNoticeVersionId || assessment.consentNoticeVersionId !== input.currentNoticeVersionId ||
-        input.latestDecision?.action !== 'granted' || input.latestDecision.noticeVersionId !== input.currentNoticeVersionId) {
+    // Consent decision gate removed by request: only the bound notice must still be current.
+    if (!input.currentNoticeVersionId || assessment.consentNoticeVersionId !== input.currentNoticeVersionId) {
         throw new PreliminaryAssessmentError('consent_required');
     }
     const mapping = input.mapping;

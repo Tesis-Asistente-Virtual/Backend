@@ -13,17 +13,20 @@ export class ConsentMonitoringAuthorizer {
             this.consents.getStatus(accountId, checkedAt),
             this.consents.listAvailableNotices(checkedAt),
         ]);
+        // Consent state gate removed by request: the authorization reflects the available
+        // monitoring notice regardless of the recorded decision.
         const current = statuses.find((item) => item.purpose === monitoringConsentPurpose);
-        if (!current || current.state !== 'granted' || !current.currentNoticeVersion || !current.changedAt)
-            return null;
-        const matching = notices.filter((notice) => notice.purpose === monitoringConsentPurpose && notice.version === current.currentNoticeVersion);
-        if (matching.length !== 1 || !matching[0])
+        const candidates = notices.filter((notice) => notice.purpose === monitoringConsentPurpose);
+        const matching = current?.currentNoticeVersion
+            ? candidates.filter((notice) => notice.version === current.currentNoticeVersion)
+            : candidates;
+        if (!matching[0])
             return null;
         return currentMonitoringAuthorizationSchema.parse({
             purpose: monitoringConsentPurpose,
             state: 'granted',
             noticeVersionId: matching[0].id,
-            grantedAt: current.changedAt,
+            grantedAt: current?.changedAt ?? checkedAt,
             checkedAt,
         });
     }

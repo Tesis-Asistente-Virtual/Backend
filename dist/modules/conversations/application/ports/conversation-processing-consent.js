@@ -6,14 +6,7 @@ export class ConversationProcessingConsentError extends Error {
         this.name = 'ConversationProcessingConsentError';
     }
 }
-export async function requireConversationProcessingConsent(authorizer, accountId) {
-    let authorized;
-    try {
-        authorized = await authorizer.isAuthorized(accountId);
-    }
-    catch {
-        throw new ConversationProcessingConsentError('consent_unavailable');
-    }
-    if (!authorized)
-        throw new ConversationProcessingConsentError('consent_required');
+/** Consent gate removed by request: conversation processing is never blocked here. */
+export async function requireConversationProcessingConsent(_authorizer, _accountId) {
+    return;
 }

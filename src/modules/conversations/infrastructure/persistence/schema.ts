@@ -59,4 +59,5 @@ export const conversationalSignalAnalyses = pgTable('conversational_signal_analy
   check('conversational_signal_analyses_expiry_check', sql`${table.expiresAt} > ${table.analyzedAt}`),
   index('conversational_signal_analyses_owner_latest_idx').on(table.accountId, table.analyzedAt.desc()),
   index('conversational_signal_analyses_expiry_idx').on(table.expiresAt),
+  unique('conversational_signal_analyses_id_account_uq').on(table.analysisId, table.accountId),
 ]);

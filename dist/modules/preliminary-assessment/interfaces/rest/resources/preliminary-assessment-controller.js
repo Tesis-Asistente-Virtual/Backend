@@ -131,7 +131,14 @@ export class PreliminaryAssessmentController {
         emptyAssessmentBodySchema.parse(req.body ?? {});
         const completed = await this.completeAssessment.execute(id, accountId);
         await this.dass21Http?.scoreCompleted(id, accountId);
-        res.status(200).json({ assessment: toAssessmentResource(completed.assessment), result: toAssessmentResultResource(completed.result) });
+        // `result` keeps the historical AssessmentResult shape (clients parse instrumentScores.reason).
+        // The DASS-21 participant result, when available, is added alongside it under `dass21Result`.
+        const dass21Result = await this.dass21Http?.getResult(id, accountId);
+        res.status(200).json({
+            assessment: toAssessmentResource(completed.assessment),
+            result: toAssessmentResultResource(completed.result),
+            dass21Result: dass21Result ?? null,
+        });
     }
     async result(req, res) {
         const accountId = req.auth?.accountId;
@@ -140,11 +147,10 @@ export class PreliminaryAssessmentController {
             return;
         }
         const { id } = assessmentIdParamsSchema.parse(req.params);
+        // Same contract as /complete: historical AssessmentResult at the top level (old and new assessments),
+        // plus the DASS-21 participant result under `dass21Result` when available.
         const dass21Result = await this.dass21Http?.getResult(id, accountId);
-        if (dass21Result !== null && dass21Result !== undefined) {
-            res.status(200).json({ result: dass21Result });
-            return;
-        }
-        res.status(200).json(toAssessmentResultResource(await this.getResult.execute(id, accountId)));
+        const historical = toAssessmentResultResource(await this.getResult.execute(id, accountId));
+        res.status(200).json({ ...historical, dass21Result: dass21Result ?? null });
     }
 }

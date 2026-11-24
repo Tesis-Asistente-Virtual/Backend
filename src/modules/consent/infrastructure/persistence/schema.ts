@@ -12,7 +12,7 @@ export const consentNoticeVersions = pgTable('consent_notice_versions', {
   status: varchar('status', { length: 20 }).notNull().default('draft'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  check('consent_notice_purpose_check', sql`${table.purpose} in ('ai_conversation_processing', 'structured_signal_extraction', 'conversational_signal_analysis', 'longitudinal_monitoring', 'preliminary_assessment')`),
+  check('consent_notice_purpose_check', sql`${table.purpose} in ('ai_conversation_processing', 'structured_signal_extraction', 'conversational_signal_analysis', 'wellbeing_recommendations', 'longitudinal_monitoring', 'preliminary_assessment')`),
   check('consent_notice_status_check', sql`${table.status} in ('draft', 'published', 'superseded')`),
   check('consent_notice_hash_check', sql`${table.contentHash} ~ '^[0-9a-f]{64}$'`),
   uniqueIndex('consent_notice_purpose_version_uq').on(table.purpose, table.version),
@@ -29,7 +29,7 @@ export const accountConsentEvents = pgTable('account_consent_events', {
   idempotencyKey: uuid('idempotency_key').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  check('account_consent_purpose_check', sql`${table.purpose} in ('ai_conversation_processing', 'structured_signal_extraction', 'conversational_signal_analysis', 'longitudinal_monitoring', 'preliminary_assessment')`),
+  check('account_consent_purpose_check', sql`${table.purpose} in ('ai_conversation_processing', 'structured_signal_extraction', 'conversational_signal_analysis', 'wellbeing_recommendations', 'longitudinal_monitoring', 'preliminary_assessment')`),
   check('account_consent_action_check', sql`${table.action} in ('granted', 'declined', 'withdrawn')`),
   uniqueIndex('account_consent_account_idempotency_uq').on(table.accountId, table.idempotencyKey),
   uniqueIndex('account_consent_sequence_uq').on(table.sequence),

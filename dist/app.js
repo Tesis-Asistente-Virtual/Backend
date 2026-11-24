@@ -13,6 +13,7 @@ import { conversationSignalExtractionRouter } from './modules/conversational-pro
 import { conversationalSignalAnalysisRouter } from './modules/conversational-processing/interfaces/rest/conversational-signal-analysis-routes.js';
 import { env } from './config/env.js';
 import { createCorsMiddleware } from './shared/infrastructure/http/cors-middleware.js';
+import { recommendationsRouter } from './modules/recommendations/interfaces/rest/recommendations-routes.js';
 export const app = express();
 app.use(createCorsMiddleware(env.corsAllowedOrigins));
 app.use(express.json());
@@ -28,4 +29,5 @@ app.use('/api/v1', conversationalSignalAnalysisRouter);
 app.use('/api/v1/consents', consentRouter);
 app.use('/api/v1/preliminary-assessments', preliminaryAssessmentsRouter);
 app.use('/api/v1/monitoring', monitoringRouter);
+app.use('/api/v1/me/recommendations', recommendationsRouter);
 app.use(errorHandler);

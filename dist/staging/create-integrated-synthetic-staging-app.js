@@ -16,20 +16,27 @@ import { SignUpController } from '../modules/authentication/interfaces/rest/reso
 import { SignInController } from '../modules/authentication/interfaces/rest/resources/sign-in-controller.js';
 import { RefreshController } from '../modules/authentication/interfaces/rest/resources/refresh-controller.js';
 import { SignOutController } from '../modules/authentication/interfaces/rest/resources/sign-out-controller.js';
-import { DrizzleConsentRepository } from '../modules/consent/infrastructure/persistence/drizzle-consent-repository.js';
-import { CheckConsentForPurpose } from '../modules/consent/application/internal/query-services/check-consent-for-purpose.js';
 import { createConsentRouter } from '../modules/consent/interfaces/rest/create-consent-router.js';
-import { DrizzleConversationRepository } from '../modules/conversations/infrastructure/persistence/drizzle-conversation-repository.js';
-import { DrizzleConversationMessageRepository } from '../modules/conversations/infrastructure/persistence/drizzle-conversation-message-repository.js';
 import { createTechnicalStagingConversationsRouter } from '../modules/conversations/interfaces/rest/technical-staging-conversations-router.js';
-import { ExtractAuthorizedConversationSignals } from '../modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
-import { SyntheticStagingAiAdapters } from '../modules/conversational-processing/infrastructure/synthetic/synthetic-staging-ai-adapters.js';
-import { ConversationSignalExtractionController } from '../modules/conversational-processing/interfaces/rest/conversation-signal-extraction-controller.js';
-import { authenticationMiddleware } from '../shared/infrastructure/http/authentication-middleware.js';
 import { createSyntheticStagingDass21Router } from '../modules/preliminary-assessment/technical-test/create-technical-test-dass21-router.js';
 import { DrizzleInstrumentCatalog } from '../modules/preliminary-assessment/infrastructure/persistence/drizzle-instrument-catalog.js';
 import { ensureDass21TechnicalTestDraft } from '../modules/preliminary-assessment/technical-test/ensure-dass21-technical-test-draft.js';
 import { isStagingLoopbackAddress, validateStagingDatabaseUrl } from '../shared/infrastructure/database/staging-database-safety.js';
+/** Deterministic local text generator for integrated staging chat. It never calls a network service. */
+class SyntheticStagingTextGenerator {
+    async generateText(_request) {
+        return { text: syntheticStagingReply, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } };
+    }
+    async *streamText(_request, signal) {
+        if (signal?.aborted)
+            return;
+        yield { type: 'delta', text: syntheticStagingReply };
+        if (signal?.aborted)
+            return;
+        yield { type: 'completed', result: { text: syntheticStagingReply, usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } } };
+    }
+}
+const syntheticStagingReply = 'Esta es una respuesta automática de prueba. Podemos continuar con información ficticia; este entorno no usa un proveedor externo.';
 const accessTokenTtlSeconds = 900;
 const refreshTokenTtlSeconds = 86_400;
 const syntheticEmailPattern = /^[a-z0-9][a-z0-9._+-]{0,63}@example\.test$/i;
@@ -42,7 +49,7 @@ export async function createIntegratedSyntheticStagingApp(input) {
     }
     // Candidate setup is confined to the explicitly guarded staging database.
     await ensureDass21TechnicalTestDraft(new DrizzleInstrumentCatalog(input.database));
-    const providers = new SyntheticStagingAiAdapters();
+    const providers = new SyntheticStagingTextGenerator();
     const accounts = new DrizzleAuthAccountRepository(input.database);
     const sessions = new DrizzleAuthSessionRepository(input.database);
     const refreshTokens = new OpaqueRefreshTokenGenerator();
@@ -86,16 +93,6 @@ export async function createIntegratedSyntheticStagingApp(input) {
     const conversationRouter = createTechnicalStagingConversationsRouter({
         database: input.database, pool: input.pool, jwt: input.jwt, generator: providers, contextMessages: 8, outputTokens: 160,
     });
-    const extraction = new ExtractAuthorizedConversationSignals(new DrizzleConversationRepository(input.database), new DrizzleConversationMessageRepository(input.database), new CheckConsentForPurpose(new DrizzleConsentRepository(input.database)), providers);
-    const extractionController = new ConversationSignalExtractionController(extraction);
-    const extractionRouter = Router();
-    const extractionAuth = authenticationMiddleware(input.jwt);
-    extractionRouter.post('/:id/signals/extract', extractionAuth, (req, res, next) => {
-        void extractionController.execute(req, res).catch(next);
-    });
-    extractionRouter.post('/:id/signals/results', extractionAuth, (req, res, next) => {
-        void extractionController.generateResult(req, res).catch(next);
-    });
     const dass21Router = await createSyntheticStagingDass21Router(input.database, input.jwt, input.stagingDatabaseUrl);
     const app = express();
     app.use(createCorsMiddleware(input.corsOrigins));
@@ -104,7 +101,6 @@ export async function createIntegratedSyntheticStagingApp(input) {
     app.use('/api/v1/auth', auth);
     app.use('/api/v1/consents', consentRouter);
     app.use('/api/v1/conversations', conversationRouter);
-    app.use('/api/v1/conversations', extractionRouter);
     app.use('/api/v1/preliminary-assessments', dass21Router);
     app.use(errorHandler);
     return app;

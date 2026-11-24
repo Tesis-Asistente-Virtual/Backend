@@ -10,7 +10,7 @@ import { conversationsPaths, conversationsSchemas } from '../../../modules/conve
 import { consentPaths, consentSchemas } from '../../../modules/consent/interfaces/rest/openapi.js';
 import { preliminaryAssessmentPaths, preliminaryAssessmentSchemas } from '../../../modules/preliminary-assessment/interfaces/rest/openapi.js';
 import { monitoringPaths, monitoringSchemas } from '../../../modules/longitudinal-monitoring/interfaces/rest/openapi.js';
-import { conversationSignalExtractionPaths, conversationSignalExtractionSchemas } from '../../../modules/conversational-processing/interfaces/rest/openapi.js';
+import { recommendationPaths, recommendationSchemas } from '../../../modules/recommendations/interfaces/rest/openapi.js';
 const profile = z.object({ firstName: z.string().nullable(), lastName: z.string().nullable(), phone: z.string().nullable() });
 const errorResponse = z.object({ error: z.string() });
 const schema = (value) => z.toJSONSchema(value, { target: 'openapi-3.0' });
@@ -22,15 +22,15 @@ export const openApiDocument = {
         description: 'API REST modular para autenticación, conversaciones, consentimiento, evaluación preliminar y gestión voluntaria de monitoreo.',
     },
     servers: [{ url: 'http://localhost:3000', description: 'Servidor local' }],
-    tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Conversations' }, { name: 'Conversational Processing' }, { name: 'Consent & Privacy' }, { name: 'Preliminary Assessment' }, { name: 'Longitudinal Monitoring' }, { name: 'Health' }],
+    tags: [{ name: 'Authentication' }, { name: 'Users' }, { name: 'Conversations' }, { name: 'Consent & Privacy' }, { name: 'Preliminary Assessment' }, { name: 'Longitudinal Monitoring' }, { name: 'Recommendations' }, { name: 'Health' }],
     paths: {
         ...authenticationPaths,
         ...usersPaths,
         ...conversationsPaths,
-        ...conversationSignalExtractionPaths,
         ...consentPaths,
         ...preliminaryAssessmentPaths,
         ...monitoringPaths,
+        ...recommendationPaths,
         '/health': { get: { tags: ['Health'], summary: 'Verificar disponibilidad del servicio', responses: { '200': { description: 'Servicio disponible', content: { 'application/json': { schema: { type: 'object', properties: { status: { type: 'string', example: 'ok' } }, required: ['status'] } } } } } } },
     },
     components: {
@@ -46,10 +46,10 @@ export const openApiDocument = {
             UpdateMyProfileRequest: schema(updateMyProfileSchema),
             ErrorResponse: schema(errorResponse),
             ...conversationsSchemas,
-            ...conversationSignalExtractionSchemas,
             ...consentSchemas,
             ...preliminaryAssessmentSchemas,
             ...monitoringSchemas,
+            ...recommendationSchemas,
         },
         responses: {
             BadRequest: { description: 'Solicitud inválida', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' }, example: { error: 'Invalid request data' } } } },

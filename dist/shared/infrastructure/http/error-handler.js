@@ -12,10 +12,8 @@ import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/mode
 import { PreliminaryAssessmentError } from '../../../modules/preliminary-assessment/domain/model/assessment-errors.js';
 import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-errors.js';
 import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
-import { SignalAuthorizationUnavailable, SignalConsentRequired, SignalConversationNotFound, SignalExtractionUnavailable, SignalMessageReferencesInvalid, } from '../../../modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
-import { ConversationSignalExtractionError } from '../../../modules/conversational-processing/application/ports/conversation-signal-extractor.js';
-import { ConversationalSignalAnalysisAuthorizationUnavailable, ConversationalSignalAnalysisConsentRequired, ConversationalSignalAnalysisConversationNotFound, ConversationalSignalAnalysisMessagesInvalid, ConversationalSignalAnalysisUnavailable, } from '../../../modules/conversational-processing/application/internal/command-services/analyze-authorized-conversation-signals.js';
-import { ConversationalSignalAnalysisError } from '../../../modules/conversational-processing/application/ports/conversational-signal-analyzer.js';
+import { RecommendationsAnalysisUnavailable, RecommendationsConsentRequired, RecommendationsGenerationInProgress, RecommendationsPersistenceConflict, RecommendationsUnavailable } from '../../../modules/recommendations/application/recommendation-errors.js';
+import { RecommendationGenerationError } from '../../../modules/recommendations/application/ports/recommendation-generator.js';
 function hasUniqueViolationCode(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
@@ -51,62 +49,6 @@ export const errorHandler = (err, _req, res, _next) => {
     }
     if (err instanceof ConversationNotFound) {
         res.status(404).json({ error: 'Conversation not found' });
-        return;
-    }
-    if (err instanceof SignalConversationNotFound) {
-        res.status(404).json({ error: 'Conversation not found' });
-        return;
-    }
-    if (err instanceof SignalMessageReferencesInvalid) {
-        res.status(400).json({ error: 'Conversation message references are invalid' });
-        return;
-    }
-    if (err instanceof SignalConsentRequired) {
-        res.status(403).json({ error: 'Current consent is required for conversation signal extraction' });
-        return;
-    }
-    if (err instanceof SignalAuthorizationUnavailable) {
-        res.status(503).json({ error: 'Consent status is temporarily unavailable' });
-        return;
-    }
-    if (err instanceof SignalExtractionUnavailable) {
-        res.status(503).json({ error: 'Conversation signal extraction is temporarily unavailable' });
-        return;
-    }
-    if (err instanceof ConversationSignalExtractionError) {
-        if (err.kind === 'invalid_input') {
-            res.status(400).json({ error: 'Invalid extraction request' });
-            return;
-        }
-        if (err.kind === 'cancelled') {
-            res.status(503).json({ error: 'Conversation signal extraction was interrupted' });
-            return;
-        }
-        res.status(503).json({ error: 'Conversation signal extraction is temporarily unavailable' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisMessagesInvalid) {
-        res.status(400).json({ error: 'Invalid message references for analysis' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisConversationNotFound) {
-        res.status(404).json({ error: 'Conversation not found' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisConsentRequired) {
-        res.status(403).json({ error: 'Current consent is required for conversational signal analysis' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisAuthorizationUnavailable) {
-        res.status(503).json({ error: 'Consent status is temporarily unavailable' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisUnavailable) {
-        res.status(503).json({ error: 'Conversational signal analysis is not enabled' });
-        return;
-    }
-    if (err instanceof ConversationalSignalAnalysisError) {
-        res.status(503).json({ error: 'Conversational signal analysis is temporarily unavailable' });
         return;
     }
     if (err instanceof ConversationArchived || err instanceof ConversationTurnInProgress) {
@@ -189,6 +131,26 @@ export const errorHandler = (err, _req, res, _next) => {
     }
     if (err instanceof AssistantGenerationUnavailable) {
         res.status(503).json({ error: 'Text generation is temporarily unavailable' });
+        return;
+    }
+    if (err instanceof RecommendationsUnavailable) {
+        res.status(503).json({ error: 'Recommendations are temporarily unavailable' });
+        return;
+    }
+    if (err instanceof RecommendationsConsentRequired) {
+        res.status(403).json({ error: 'Current recommendations consent is required' });
+        return;
+    }
+    if (err instanceof RecommendationsAnalysisUnavailable) {
+        res.status(404).json({ error: 'Source analysis is unavailable' });
+        return;
+    }
+    if (err instanceof RecommendationsGenerationInProgress || err instanceof RecommendationsPersistenceConflict) {
+        res.status(409).json({ error: 'Recommendation generation conflicts with current state' });
+        return;
+    }
+    if (err instanceof RecommendationGenerationError) {
+        res.status(err.kind === 'invalid_response' ? 502 : 503).json({ error: 'Recommendation generation is temporarily unavailable' });
         return;
     }
     console.error('Unhandled request error');

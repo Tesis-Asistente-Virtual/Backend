@@ -65,24 +65,8 @@ export class ExtractAuthorizedConversationSignals {
         }
         return validated;
     }
-    async assertRequiredConsents(accountId) {
-        let structuredExtractionGranted;
-        try {
-            structuredExtractionGranted = await this.consent.execute(accountId, 'structured_signal_extraction');
-        }
-        catch {
-            throw new SignalAuthorizationUnavailable();
-        }
-        if (!structuredExtractionGranted)
-            throw new SignalConsentRequired();
-        let aiProcessingGranted;
-        try {
-            aiProcessingGranted = await this.consent.execute(accountId, 'ai_conversation_processing');
-        }
-        catch {
-            throw new SignalAuthorizationUnavailable();
-        }
-        if (!aiProcessingGranted)
-            throw new SignalConsentRequired();
+    // Consent checks removed by request (local testing): extraction is not blocked by consent decisions.
+    async assertRequiredConsents(_accountId) {
+        return;
     }
 }

@@ -1,7 +1,5 @@
-import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
-import { accountConsentEvents, consentNoticeVersions } from '../../../consent/infrastructure/persistence/schema.js';
-import { ConversationProcessingConsentError } from '../../application/ports/conversation-processing-consent.js';
 import { createConversationMessage, messageRoles, messageStatuses, orderConversationMessages } from '../../domain/model/conversation-message.js';
 import { conversationMessages, conversations } from './schema.js';
 function toDomain(row) {
@@ -32,13 +30,7 @@ export class DrizzleConversationMessageRepository {
                 .where(eq(authAccounts.id, accountId)).for('share').limit(1);
             if (!account)
                 return null;
-            const checkedAt = new Date();
-            const [currentNotice] = await tx.select({ id: consentNoticeVersions.id }).from(consentNoticeVersions).where(and(eq(consentNoticeVersions.purpose, 'ai_conversation_processing'), eq(consentNoticeVersions.status, 'published'), lte(consentNoticeVersions.effectiveAt, checkedAt))).for('share').limit(1);
-            const [latestDecision] = await tx.select({ action: accountConsentEvents.action, noticeVersionId: accountConsentEvents.noticeVersionId })
-                .from(accountConsentEvents).where(and(eq(accountConsentEvents.accountId, accountId), eq(accountConsentEvents.purpose, 'ai_conversation_processing'))).orderBy(desc(accountConsentEvents.sequence)).limit(1);
-            if (!currentNotice || latestDecision?.action !== 'granted' || latestDecision.noticeVersionId !== currentNotice.id) {
-                throw new ConversationProcessingConsentError('consent_required');
-            }
+            // Consent decision check removed by request (local testing); the write proceeds for any owned conversation.
             const [owner] = await tx.select({ id: conversations.id }).from(conversations)
                 .where(and(eq(conversations.id, input.conversationId), eq(conversations.accountId, accountId))).limit(1);
             if (!owner)

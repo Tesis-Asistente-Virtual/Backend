@@ -7,10 +7,10 @@ import swaggerUi from 'swagger-ui-express';
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all forty operations', () => {
+  it('generates OpenAPI 3.0 documentation for all forty-two operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(40);
+    expect(operations).toHaveLength(42);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -38,6 +38,8 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions/{sessionId}/conversation');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/me/recommendations/generate');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/me/recommendations/latest');
     expect(openApiDocument.paths).toHaveProperty('/health');
     expect(openApiDocument.components.schemas).toHaveProperty('SignUpRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('UpdateMyProfileRequest');
@@ -51,6 +53,8 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.components.schemas).toHaveProperty('MonitoringInfo');
     expect(openApiDocument.components.schemas).toHaveProperty('MonitoringEnrollment');
     expect(openApiDocument.components.schemas).toHaveProperty('MonitoringSession');
+    expect(openApiDocument.components.schemas).toHaveProperty('GenerateRecommendationsRequest');
+    expect(openApiDocument.components.schemas).toHaveProperty('RecommendationResponse');
   });
   it('marks both private profile operations as Bearer protected', () => {
     const mePath = openApiDocument.paths['/api/v1/users/me'];
@@ -80,6 +84,10 @@ describe('OpenAPI document', () => {
     for (const [path, item] of Object.entries(openApiDocument.paths).filter(([path]) => path.startsWith('/api/v1/preliminary-assessments'))) {
       for (const operation of Object.values(item)) expect(operation.security, path).toEqual([{ bearerAuth: [] }]);
     }
+  });
+  it('marks recommendations operations as Bearer protected', () => {
+    expect(openApiDocument.paths['/api/v1/me/recommendations/generate'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/me/recommendations/latest'].get.security).toEqual([{ bearerAuth: [] }]);
   });
 
   it('generates local Swagger asset URLs and includes the installed CSS and JS bundles', () => {

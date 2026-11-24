@@ -63,8 +63,7 @@ export class AnalyzeAuthorizedConversationSignals {
         if (!this.policy.enabled || !this.policy.retentionDays || !this.analyzer)
             throw new ConversationalSignalAnalysisUnavailable();
         const accountId = z.string().uuid().parse(accountIdValue).toLowerCase();
-        if (!this.policy.allowedAccountIds.includes(accountId))
-            throw new ConversationalSignalAnalysisUnavailable();
+        // Account allow-list removed by request (local testing).
         const parsedInput = requestSchema.safeParse(inputValue);
         if (!parsedInput.success)
             throw new ConversationalSignalAnalysisMessagesInvalid();
@@ -110,18 +109,9 @@ export class AnalyzeAuthorizedConversationSignals {
             throw new ConversationalSignalAnalysisConversationNotFound();
         return saved;
     }
-    async assertConsents(accountId) {
-        try {
-            for (const purpose of requiredConsents) {
-                if (!await this.consent.execute(accountId, purpose))
-                    throw new ConversationalSignalAnalysisConsentRequired();
-            }
-        }
-        catch (error) {
-            if (error instanceof ConversationalSignalAnalysisConsentRequired)
-                throw error;
-            throw new ConversationalSignalAnalysisAuthorizationUnavailable();
-        }
+    // Consent checks removed by request (local testing): analysis is not blocked by consent decisions.
+    async assertConsents(_accountId) {
+        return;
     }
 }
 export class GetMyConversationalSignalAnalysis {
@@ -135,8 +125,6 @@ export class GetMyConversationalSignalAnalysis {
         if (!this.policy.enabled)
             throw new ConversationalSignalAnalysisUnavailable();
         const ownerId = z.string().uuid().parse(accountId).toLowerCase();
-        if (!this.policy.allowedAccountIds.includes(ownerId))
-            throw new ConversationalSignalAnalysisUnavailable();
         const analysis = await this.analyses.findLatestForOwnerWithCurrentConsent(ownerId);
         return analysis;
     }
@@ -145,8 +133,6 @@ export class GetMyConversationalSignalAnalysis {
             throw new ConversationalSignalAnalysisUnavailable();
         const safeLimit = z.number().int().min(1).max(20).parse(limit);
         const ownerId = z.string().uuid().parse(accountId).toLowerCase();
-        if (!this.policy.allowedAccountIds.includes(ownerId))
-            throw new ConversationalSignalAnalysisUnavailable();
         return this.analyses.listRecentForOwnerWithCurrentConsent(ownerId, safeLimit);
     }
 }

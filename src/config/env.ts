@@ -31,6 +31,10 @@ export const env = {
   openAiMaxOutputTokens: positiveInteger('OPENAI_MAX_OUTPUT_TOKENS', 800),
   openAiMaxContextMessages: positiveInteger('OPENAI_MAX_CONTEXT_MESSAGES', 20),
   openAiMaxContextCharacters: positiveInteger('OPENAI_MAX_CONTEXT_CHARACTERS', 24_000),
+  wellbeingRecommendationsEnabled: process.env.WELLBEING_RECOMMENDATIONS_ENABLED === 'true',
+  wellbeingRecommendationsDeployment: process.env.WELLBEING_RECOMMENDATIONS_DEPLOYMENT,
+  wellbeingRecommendationsAllowedAccountIds: (process.env.WELLBEING_RECOMMENDATIONS_ALLOWED_ACCOUNT_IDS ?? '')
+    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
   // Pilot policy gate removed by request (local testing): analysis is enabled for every account,
   // with the 90-day retention already defined by the module.
   conversationalSignalAnalysisPolicy: Object.freeze({ enabled: true, retentionDays: 90, allowedAccountIds: Object.freeze([] as string[]) }),

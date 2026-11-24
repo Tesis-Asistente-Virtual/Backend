@@ -21,6 +21,7 @@ describe('Consent & Privacy', () => {
       'ai_conversation_processing',
       'structured_signal_extraction',
       'conversational_signal_analysis',
+      'wellbeing_recommendations',
       'longitudinal_monitoring',
       'preliminary_assessment',
     ]);

@@ -13,6 +13,8 @@ import { ConsentIdempotencyConflict } from '../../../modules/consent/domain/mode
 import { PreliminaryAssessmentError } from '../../../modules/preliminary-assessment/domain/model/assessment-errors.js';
 import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-errors.js';
 import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
+import { RecommendationsAnalysisUnavailable, RecommendationsConsentRequired, RecommendationsGenerationInProgress, RecommendationsPersistenceConflict, RecommendationsUnavailable } from '../../../modules/recommendations/application/recommendation-errors.js';
+import { RecommendationGenerationError } from '../../../modules/recommendations/application/ports/recommendation-generator.js';
 
 function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -96,6 +98,15 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof AssistantGenerationUnavailable) {
     res.status(503).json({ error: 'Text generation is temporarily unavailable' });
     return;
+  }
+  if (err instanceof RecommendationsUnavailable) { res.status(503).json({ error: 'Recommendations are temporarily unavailable' }); return; }
+  if (err instanceof RecommendationsConsentRequired) { res.status(403).json({ error: 'Current recommendations consent is required' }); return; }
+  if (err instanceof RecommendationsAnalysisUnavailable) { res.status(404).json({ error: 'Source analysis is unavailable' }); return; }
+  if (err instanceof RecommendationsGenerationInProgress || err instanceof RecommendationsPersistenceConflict) {
+    res.status(409).json({ error: 'Recommendation generation conflicts with current state' }); return;
+  }
+  if (err instanceof RecommendationGenerationError) {
+    res.status(err.kind === 'invalid_response' ? 502 : 503).json({ error: 'Recommendation generation is temporarily unavailable' }); return;
   }
   console.error('Unhandled request error');
   res.status(500).json({ error: 'Internal server error' });
