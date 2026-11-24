@@ -19,6 +19,7 @@ import { ConsoleConversationStreamObserver } from '../../infrastructure/observab
 import { DrizzleConsentRepository } from '../../../consent/infrastructure/persistence/drizzle-consent-repository.js';
 import { CheckConsentForPurpose } from '../../../consent/application/internal/query-services/check-consent-for-purpose.js';
 import { ConsentConversationProcessingAuthorizer } from '../../infrastructure/persistence/consent-conversation-processing-authorizer.js';
+import { DeleteMyConversation } from '../../application/internal/command-services/delete-my-conversation.js';
 const router = Router();
 const jwt = JwtAccessTokenService.fromEnvironment();
 if (db && pool && jwt) {
@@ -37,13 +38,14 @@ if (db && pool && jwt) {
         if (!(error instanceof OpenAiConfigurationError))
             throw error;
     }
-    const controller = new ConversationsController(new CreateConversation(conversations), new ListConversations(conversations), new GetConversation(conversations), new ListConversationMessages(conversations, messages), sendMessage, streamMessage);
+    const controller = new ConversationsController(new CreateConversation(conversations), new ListConversations(conversations), new GetConversation(conversations), new ListConversationMessages(conversations, messages), sendMessage, streamMessage, new DeleteMyConversation(conversations, turnLock));
     router.post('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.create(req, res).catch(next); });
     router.get('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.list(req, res).catch(next); });
     router.get('/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.listConversationMessages(req, res).catch(next); });
     router.post('/:id/messages', authenticationMiddleware(jwt), (req, res, next) => { void controller.sendConversationMessage(req, res).catch(next); });
     router.post('/:id/messages/stream', authenticationMiddleware(jwt), (req, res, next) => { void controller.streamConversationMessage(req, res).catch(next); });
     router.get('/:id', authenticationMiddleware(jwt), (req, res, next) => { void controller.get(req, res).catch(next); });
+    router.delete('/:id', authenticationMiddleware(jwt), (req, res, next) => { void controller.delete(req, res).catch(next); });
 }
 else {
     for (const method of ['post', 'get']) {
@@ -53,5 +55,6 @@ else {
     router.post('/:id/messages', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
     router.post('/:id/messages/stream', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
     router.get('/:id', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
+    router.delete('/:id', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
 }
 export const conversationsRouter = router;

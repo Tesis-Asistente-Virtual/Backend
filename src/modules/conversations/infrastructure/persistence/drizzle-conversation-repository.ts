@@ -4,7 +4,7 @@ import type * as schema from '../../../../shared/infrastructure/database/schema.
 import { createConversation, conversationStatuses, type Conversation, type ConversationStatus, type NewConversation } from '../../domain/model/conversation.js';
 import type { Page, Pagination } from '../../domain/model/pagination.js';
 import type { ConversationRepository } from '../../domain/repositories/conversation-repository.js';
-import { conversations } from './schema.js';
+import { conversationSuppressionAudits, conversations } from './schema.js';
 
 function toDomain(row: typeof conversations.$inferSelect): Conversation {
   if (!conversationStatuses.includes(row.status as ConversationStatus)) throw new Error('Stored conversation has an invalid status');
@@ -34,5 +34,16 @@ export class DrizzleConversationRepository implements ConversationRepository {
       .offset(pagination.offset);
     const hasMore = rows.length > pagination.limit;
     return { items: rows.slice(0, pagination.limit).map(toDomain), limit: pagination.limit, offset: pagination.offset, hasMore };
+  }
+
+  async deleteForOwner(accountId: string, conversationId: string): Promise<boolean> {
+    return this.db.transaction(async tx => {
+      const deleted = await tx.delete(conversations).where(and(
+        eq(conversations.id, conversationId), eq(conversations.accountId, accountId),
+      )).returning({ id: conversations.id });
+      if (deleted.length === 0) return false;
+      await tx.insert(conversationSuppressionAudits).values({ accountId, deletedConversationCount: 1 });
+      return true;
+    });
   }
 }

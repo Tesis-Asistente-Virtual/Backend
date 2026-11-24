@@ -14,6 +14,7 @@ import type { ConversationMessageRepository } from '../../../src/modules/convers
 import type { AiTextGenerator } from '../../../src/modules/conversations/application/ports/ai-text-generator.js';
 import type { ConversationTurnLock } from '../../../src/modules/conversations/application/ports/conversation-turn-lock.js';
 import { SendConversationMessage } from '../../../src/modules/conversations/application/internal/command-services/send-conversation-message.js';
+import { DeleteMyConversation } from '../../../src/modules/conversations/application/internal/command-services/delete-my-conversation.js';
 import { errorHandler } from '../../../src/shared/infrastructure/http/error-handler.js';
 import { paginationQuerySchema } from '../../../src/modules/conversations/interfaces/rest/validation/conversation-request-schemas.js';
 import type { ConversationProcessingConsentAuthorizer } from '../../../src/modules/conversations/application/ports/conversation-processing-consent.js';
@@ -29,6 +30,7 @@ function harness(foundConversation: Conversation | null = conversation, generati
     create: vi.fn(async (input: NewConversation) => ({ ...conversation, accountId: input.accountId, title: input.title ?? null })),
     findByIdForOwner: vi.fn(async (id: string, ownerId: string) => id === conversationId && ownerId === accountId ? foundConversation : null),
     listByOwner: vi.fn(async (_ownerId: string, pagination: Pagination): Promise<Page<Conversation>> => ({ items: [conversation], ...pagination, hasMore: false })),
+    deleteForOwner: vi.fn(async () => true),
   };
   const createMessage = vi.fn(async (_ownerId: string, input: Parameters<ConversationMessageRepository['createForOwner']>[1]) => ({ ...message, role: input.role, content: input.content, status: input.status ?? 'completed' }));
   const messages: ConversationMessageRepository = {
@@ -50,6 +52,8 @@ function harness(foundConversation: Conversation | null = conversation, generati
       new GetConversation(conversations),
       new ListConversationMessages(conversations, messages),
       generationConfigured ? new SendConversationMessage(conversations, messages, generator, lock, 4, 250, consent) : undefined,
+      undefined,
+      new DeleteMyConversation(conversations, lock),
     ), conversations, messages,
   };
 }
@@ -84,6 +88,21 @@ describe('Conversations REST controllers', () => {
     expect(h.conversations.findByIdForOwner).toHaveBeenCalledWith(conversationId, accountId);
     await h.controller.listConversationMessages(request(true, {}, { id: conversationId }, { limit: '5', offset: '10' }), res);
     expect(h.messages.listByConversationForOwner).toHaveBeenCalledWith(conversationId, accountId, { limit: 5, offset: 10 });
+  });
+
+  it('deletes only the authenticated owner conversation and returns 204', async () => {
+    const h = harness(); const res = response();
+    await h.controller.delete(request(true, {}, { id: conversationId }), res);
+    expect(h.conversations.deleteForOwner).toHaveBeenCalledWith(accountId, conversationId);
+    expect(res.status).toHaveBeenCalledWith(204);
+    expect(res.end).toHaveBeenCalled();
+  });
+
+  it('does not invoke suppression without an authenticated account', async () => {
+    const h = harness(); const res = response();
+    await h.controller.delete(request(false, {}, { id: conversationId }), res);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(h.conversations.deleteForOwner).not.toHaveBeenCalled();
   });
 
   it('sends a message using only the authenticated owner ID and returns both persisted message DTOs', async () => {

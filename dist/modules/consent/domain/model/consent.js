@@ -1,6 +1,7 @@
 export const consentPurposes = [
     'ai_conversation_processing',
     'structured_signal_extraction',
+    'conversational_signal_analysis',
     'longitudinal_monitoring',
     'preliminary_assessment',
 ];

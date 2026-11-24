@@ -26,6 +26,7 @@ function harness(options: { status?: 'active' | 'archived' | null; providerError
     create: vi.fn(),
     findByIdForOwner: vi.fn(async (id: string, ownerId: string) => id === conversationId && ownerId === accountId && options.status !== null ? conversation : null),
     listByOwner: vi.fn(async (_ownerId: string, pagination: Pagination): Promise<Page<Conversation>> => ({ items: [], ...pagination, hasMore: false })),
+    deleteForOwner: vi.fn(async () => true),
   };
   const createMessage = vi.fn(async (ownerId: string, input: NewConversationMessage) => {
       if (ownerId !== accountId) return null;

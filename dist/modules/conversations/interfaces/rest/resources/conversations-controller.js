@@ -31,13 +31,15 @@ export class ConversationsController {
     listMessages;
     sendMessage;
     streamMessage;
-    constructor(createConversation, listConversations, getConversation, listMessages, sendMessage, streamMessage) {
+    deleteConversation;
+    constructor(createConversation, listConversations, getConversation, listMessages, sendMessage, streamMessage, deleteConversation) {
         this.createConversation = createConversation;
         this.listConversations = listConversations;
         this.getConversation = getConversation;
         this.listMessages = listMessages;
         this.sendMessage = sendMessage;
         this.streamMessage = streamMessage;
+        this.deleteConversation = deleteConversation;
     }
     async create(req, res) {
         const accountId = req.auth?.accountId;
@@ -67,6 +69,18 @@ export class ConversationsController {
         }
         const { id } = conversationIdParamsSchema.parse(req.params);
         res.status(200).json(toConversationResource(await this.getConversation.execute(id, accountId)));
+    }
+    async delete(req, res) {
+        const accountId = req.auth?.accountId;
+        if (!accountId) {
+            res.status(401).json({ error: 'Unauthorized' });
+            return;
+        }
+        const { id } = conversationIdParamsSchema.parse(req.params);
+        if (!this.deleteConversation)
+            throw new Error('Conversation suppression is not configured');
+        await this.deleteConversation.execute(accountId, id);
+        res.status(204).end();
     }
     async listConversationMessages(req, res) {
         const accountId = req.auth?.accountId;

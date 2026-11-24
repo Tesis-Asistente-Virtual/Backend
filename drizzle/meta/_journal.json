@@ -85,6 +85,20 @@
       "when": 1795495176571,
       "tag": "0011_dass21_publication_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795500000000,
+      "tag": "0012_conversational_signal_analysis",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795515055127,
+      "tag": "0013_conversation_suppression_audit",
+      "breakpoints": true
     }
   ]
 }

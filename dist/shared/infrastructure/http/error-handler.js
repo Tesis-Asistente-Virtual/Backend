@@ -14,6 +14,8 @@ import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain
 import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
 import { SignalAuthorizationUnavailable, SignalConsentRequired, SignalConversationNotFound, SignalExtractionUnavailable, SignalMessageReferencesInvalid, } from '../../../modules/conversational-processing/application/internal/command-services/extract-authorized-conversation-signals.js';
 import { ConversationSignalExtractionError } from '../../../modules/conversational-processing/application/ports/conversation-signal-extractor.js';
+import { ConversationalSignalAnalysisAuthorizationUnavailable, ConversationalSignalAnalysisConsentRequired, ConversationalSignalAnalysisConversationNotFound, ConversationalSignalAnalysisMessagesInvalid, ConversationalSignalAnalysisUnavailable, } from '../../../modules/conversational-processing/application/internal/command-services/analyze-authorized-conversation-signals.js';
+import { ConversationalSignalAnalysisError } from '../../../modules/conversational-processing/application/ports/conversational-signal-analyzer.js';
 function hasUniqueViolationCode(error) {
     return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
 }
@@ -81,6 +83,30 @@ export const errorHandler = (err, _req, res, _next) => {
             return;
         }
         res.status(503).json({ error: 'Conversation signal extraction is temporarily unavailable' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisMessagesInvalid) {
+        res.status(400).json({ error: 'Invalid message references for analysis' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisConversationNotFound) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisConsentRequired) {
+        res.status(403).json({ error: 'Current consent is required for conversational signal analysis' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisAuthorizationUnavailable) {
+        res.status(503).json({ error: 'Consent status is temporarily unavailable' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisUnavailable) {
+        res.status(503).json({ error: 'Conversational signal analysis is not enabled' });
+        return;
+    }
+    if (err instanceof ConversationalSignalAnalysisError) {
+        res.status(503).json({ error: 'Conversational signal analysis is temporarily unavailable' });
         return;
     }
     if (err instanceof ConversationArchived || err instanceof ConversationTurnInProgress) {

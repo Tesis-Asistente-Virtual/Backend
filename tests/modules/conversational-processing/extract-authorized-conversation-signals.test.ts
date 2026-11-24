@@ -84,6 +84,7 @@ function harness(options: HarnessOptions = {}) {
       return id === conversationId && ownerId === accountId ? ownedConversation ?? null : null;
     }),
     listByOwner: vi.fn(async () => ({ items: [], limit: 10, offset: 0, hasMore: false })),
+    deleteForOwner: vi.fn(async () => true),
   };
   const messageRepository: ConversationMessageRepository = {
     createForOwner: vi.fn(async () => null),

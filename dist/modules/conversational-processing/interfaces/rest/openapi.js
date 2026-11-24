@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { extractConversationSignalsRequestSchema, extractConversationSignalsResponseSchema, generateConversationSignalResultResponseSchema, } from './conversation-signal-extraction-controller.js';
+import { analyzeConversationSignalsRequestSchema, conversationalSignalsHistoryResponseSchema, latestConversationalSignalsResponseSchema, } from './conversation-signal-analysis-controller.js';
+import { conversationalSignalAnalysisSchema } from '../../domain/model/conversational-signal-analysis.js';
 const schema = (value) => z.toJSONSchema(value, { target: 'openapi-3.0' });
 const security = [{ bearerAuth: [] }];
 const error = { $ref: '#/components/schemas/ErrorResponse' };
@@ -56,6 +58,10 @@ export const conversationSignalExtractionSchemas = {
     ExtractConversationSignalsRequest: schema(extractConversationSignalsRequestSchema),
     ConversationSignalExtractionResponse: schema(extractConversationSignalsResponseSchema),
     GenerateConversationSignalResultResponse: schema(generateConversationSignalResultResponseSchema),
+    AnalyzeConversationSignalsRequest: schema(analyzeConversationSignalsRequestSchema),
+    ConversationalSignalAnalysis: schema(conversationalSignalAnalysisSchema.omit({ accountId: true })),
+    LatestConversationalSignalAnalysisResponse: schema(latestConversationalSignalsResponseSchema),
+    ConversationalSignalAnalysisHistoryResponse: schema(conversationalSignalsHistoryResponseSchema),
 };
 export const conversationSignalExtractionPaths = {
     '/api/v1/conversations/{id}/signals/extract': {
@@ -97,6 +103,53 @@ export const conversationSignalExtractionPaths = {
                 '403': { description: 'Falta uno de los consentimientos vigentes requeridos', content: { 'application/json': { schema: error } } },
                 '404': { description: 'Conversación inexistente o no perteneciente a la cuenta', content: { 'application/json': { schema: error } } },
                 '503': { description: 'Autorización o extracción temporalmente no disponible', content: { 'application/json': { schema: error } } },
+            },
+        },
+    },
+    '/api/v1/conversations/{id}/signals/analyze': {
+        post: {
+            tags: ['Conversational Processing'],
+            summary: 'Solicitar análisis exploratorio y persistirlo bajo consentimiento específico',
+            description: 'Operación explícita; no se ejecuta en cada mensaje. Requiere ai_conversation_processing, structured_signal_extraction y conversational_signal_analysis vigentes. El análisis clasifica solo evidencia textual seleccionada, no gravedad clínica, diagnóstico, riesgo ni DASS-21. Está deshabilitado por defecto hasta que se aprueben consentimiento y retención.',
+            security,
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+            requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AnalyzeConversationSignalsRequest' } } } },
+            responses: {
+                '200': { description: 'Análisis estructurado persistido y validado con referencias a mensajes seleccionados', content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationalSignalAnalysis' } } } },
+                '400': { description: 'Referencias de mensaje inválidas', content: { 'application/json': { schema: error } } },
+                '401': { description: 'JWT ausente o inválido', content: { 'application/json': { schema: error } } },
+                '403': { description: 'Falta consentimiento vigente para alguna finalidad requerida', content: { 'application/json': { schema: error } } },
+                '404': { description: 'Conversación ajena o inexistente', content: { 'application/json': { schema: error } } },
+                '503': { description: 'Función deshabilitada, autorización no disponible o proveedor no disponible', content: { 'application/json': { schema: error } } },
+            },
+        },
+    },
+    '/api/v1/me/conversational-signals/latest': {
+        get: {
+            tags: ['Conversational Processing'],
+            summary: 'Consultar el último análisis propio vigente',
+            description: 'No vuelve a llamar al proveedor. Requiere JWT y los consentimientos vigentes para procesamiento, extracción y análisis. Devuelve not_available cuando no existe análisis vigente; los registros caducados no se devuelven.',
+            security,
+            responses: {
+                '200': { description: 'Último análisis propio o estado explícito sin resultados', content: { 'application/json': { schema: { $ref: '#/components/schemas/LatestConversationalSignalAnalysisResponse' } } } },
+                '401': { description: 'JWT ausente o inválido', content: { 'application/json': { schema: error } } },
+                '403': { description: 'Consentimiento ausente, retirado o desactualizado', content: { 'application/json': { schema: error } } },
+                '503': { description: 'Función deshabilitada o autorización no disponible', content: { 'application/json': { schema: error } } },
+            },
+        },
+    },
+    '/api/v1/me/conversational-signals/history': {
+        get: {
+            tags: ['Conversational Processing'],
+            summary: 'Consultar historial propio de análisis vigentes',
+            description: 'No vuelve a llamar al proveedor. Requiere JWT y consentimientos vigentes. Limit opcional de 1 a 20; no devuelve registros de otras cuentas.',
+            security,
+            parameters: [{ name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 20, default: 20 } }],
+            responses: {
+                '200': { description: 'Historial propio vigente; puede ser una lista vacía', content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationalSignalAnalysisHistoryResponse' } } } },
+                '401': { description: 'JWT ausente o inválido', content: { 'application/json': { schema: error } } },
+                '403': { description: 'Consentimiento ausente, retirado o desactualizado', content: { 'application/json': { schema: error } } },
+                '503': { description: 'Función deshabilitada o autorización no disponible', content: { 'application/json': { schema: error } } },
             },
         },
     },

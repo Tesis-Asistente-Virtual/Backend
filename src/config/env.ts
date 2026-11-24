@@ -1,5 +1,10 @@
 import 'dotenv/config';
 import { parseCorsAllowedOrigins } from './cors.js';
+import {
+  parseOptionalFeatureFlag,
+  parseOptionalPositiveInteger,
+  resolveConversationalSignalAnalysisPilotPolicy,
+} from './conversational-signal-analysis-policy.js';
 
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT must be a valid port');
@@ -31,4 +36,11 @@ export const env = {
   openAiMaxOutputTokens: positiveInteger('OPENAI_MAX_OUTPUT_TOKENS', 800),
   openAiMaxContextMessages: positiveInteger('OPENAI_MAX_CONTEXT_MESSAGES', 20),
   openAiMaxContextCharacters: positiveInteger('OPENAI_MAX_CONTEXT_CHARACTERS', 24_000),
+  conversationalSignalAnalysisPolicy: resolveConversationalSignalAnalysisPilotPolicy({
+    enabled: parseOptionalFeatureFlag('CONVERSATIONAL_SIGNAL_ANALYSIS_ENABLED', process.env.CONVERSATIONAL_SIGNAL_ANALYSIS_ENABLED),
+    deployment: process.env.CONVERSATIONAL_SIGNAL_ANALYSIS_DEPLOYMENT,
+    allowedAccountIds: process.env.CONVERSATIONAL_SIGNAL_ANALYSIS_ALLOWED_ACCOUNT_IDS,
+    retentionDays: parseOptionalPositiveInteger('CONVERSATIONAL_SIGNAL_ANALYSIS_RETENTION_DAYS', process.env.CONVERSATIONAL_SIGNAL_ANALYSIS_RETENTION_DAYS),
+    authorizationReference: process.env.CONVERSATIONAL_SIGNAL_ANALYSIS_AUTHORIZATION_REFERENCE,
+  }),
 };

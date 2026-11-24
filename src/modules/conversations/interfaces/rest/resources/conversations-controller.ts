@@ -7,6 +7,7 @@ import { AssistantGenerationUnavailable, ConversationArchived, SendConversationM
 import { conversationIdParamsSchema, createConversationRequestSchema, paginationQuerySchema, sendConversationMessageRequestSchema } from '../validation/conversation-request-schemas.js';
 import { toConversationMessageResource, toConversationResource, toPageResource } from '../transformers/conversation-transformer.js';
 import { StreamConversationMessage, type ConversationMessageStreamEvent } from '../../../application/internal/command-services/stream-conversation-message.js';
+import { DeleteMyConversation } from '../../../application/internal/command-services/delete-my-conversation.js';
 
 async function writeWhenReady(res: Response, frame: string, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
@@ -36,6 +37,7 @@ export class ConversationsController {
     private readonly listMessages: ListConversationMessages,
     private readonly sendMessage?: SendConversationMessage,
     private readonly streamMessage?: StreamConversationMessage,
+    private readonly deleteConversation?: DeleteMyConversation,
   ) {}
 
   async create(req: Request, res: Response): Promise<void> {
@@ -59,6 +61,15 @@ export class ConversationsController {
     if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
     const { id } = conversationIdParamsSchema.parse(req.params);
     res.status(200).json(toConversationResource(await this.getConversation.execute(id, accountId)));
+  }
+
+  async delete(req: Request, res: Response): Promise<void> {
+    const accountId = req.auth?.accountId;
+    if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const { id } = conversationIdParamsSchema.parse(req.params);
+    if (!this.deleteConversation) throw new Error('Conversation suppression is not configured');
+    await this.deleteConversation.execute(accountId, id);
+    res.status(204).end();
   }
 
   async listConversationMessages(req: Request, res: Response): Promise<void> {

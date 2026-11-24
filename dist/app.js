@@ -10,6 +10,7 @@ import { consentRouter } from './modules/consent/interfaces/rest/consent-routes.
 import { preliminaryAssessmentsRouter } from './modules/preliminary-assessment/interfaces/rest/preliminary-assessment-routes.js';
 import { monitoringRouter } from './modules/longitudinal-monitoring/interfaces/rest/monitoring-routes.js';
 import { conversationSignalExtractionRouter } from './modules/conversational-processing/interfaces/rest/conversation-signal-extraction-routes.js';
+import { conversationalSignalAnalysisRouter } from './modules/conversational-processing/interfaces/rest/conversational-signal-analysis-routes.js';
 import { env } from './config/env.js';
 import { createCorsMiddleware } from './shared/infrastructure/http/cors-middleware.js';
 export const app = express();
@@ -23,6 +24,7 @@ app.use('/api/v1/auth', sessionRouter);
 app.use('/api/v1/users', usersRouter);
 app.use('/api/v1/conversations', conversationsRouter);
 app.use('/api/v1/conversations', conversationSignalExtractionRouter);
+app.use('/api/v1', conversationalSignalAnalysisRouter);
 app.use('/api/v1/consents', consentRouter);
 app.use('/api/v1/preliminary-assessments', preliminaryAssessmentsRouter);
 app.use('/api/v1/monitoring', monitoringRouter);

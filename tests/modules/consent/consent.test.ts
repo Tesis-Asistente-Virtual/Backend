@@ -16,10 +16,11 @@ function repository(status: ConsentStatus[]): ConsentRepository {
 }
 
 describe('Consent & Privacy', () => {
-  it('keeps the four independent purposes supported by the notice and decision contracts', () => {
+  it('keeps the independent purposes supported by the notice and decision contracts', () => {
     expect(consentPurposes).toEqual([
       'ai_conversation_processing',
       'structured_signal_extraction',
+      'conversational_signal_analysis',
       'longitudinal_monitoring',
       'preliminary_assessment',
     ]);

@@ -58,6 +58,14 @@ export const conversationsPaths = {
                 '400': badRequest, '401': unauthorized, '404': notFound, '500': serverError,
             },
         },
+        delete: {
+            tags: ['Conversations'], summary: 'Solicitar supresión de una conversación propia y sus datos derivados', security,
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+            responses: {
+                '204': { description: 'Conversación, mensajes, análisis de señales y asociaciones vinculadas eliminados; se conserva el historial de decisiones de consentimiento' },
+                '401': unauthorized, '404': notFound, '500': serverError,
+            },
+        },
     },
     '/api/v1/conversations/{id}/messages': {
         post: {
