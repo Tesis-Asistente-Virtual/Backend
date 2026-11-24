@@ -4,7 +4,7 @@ import { approvedDass21InterpretationSupportSchema, buildInternalDass21Result, d
 import { DASS21_INTERPRETATION_VERSION } from '../../../domain/model/dass21-interpretation.js';
 import { DASS21_SCORING_VERSION } from '../../../domain/model/dass21-scoring.js';
 import { PreliminaryAssessmentError } from '../../../domain/model/assessment-errors.js';
-/** Internal-only reader. It is not composed into REST, jobs, or participant workflows. */
+/** Transactional internal reader. HTTP uses its DTO only after separate server-side disclosure authorization. */
 export class GetMyInternalDass21Result {
     reads;
     support;

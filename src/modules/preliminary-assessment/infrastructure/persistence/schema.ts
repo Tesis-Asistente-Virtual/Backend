@@ -32,6 +32,23 @@ export const assessmentInstrumentVersions = pgTable('assessment_instrument_versi
   check('assessment_instrument_publication_check', sql`${table.status} <> 'approved' OR (${table.approvalStatus} = 'approved' AND ${table.approvedAt} IS NOT NULL AND ${table.approvalReference} IS NOT NULL AND ${table.licenseStatus} IN ('authorized', 'not_applicable'))`),
 ]);
 
+/** Append-only audit for local, evidence-backed publication of an exact DASS-21 version. */
+export const dass21VersionPublicationAudit = pgTable('dass21_version_publication_audit', {
+  eventId: uuid('event_id').defaultRandom().primaryKey(),
+  instrumentId: uuid('instrument_id').notNull(),
+  instrumentVersionId: uuid('instrument_version_id').notNull().references(() => assessmentInstrumentVersions.instrumentVersionId, { onDelete: 'restrict' }),
+  instrumentVersion: varchar('instrument_version', { length: 40 }).notNull(),
+  questionSetSha256: varchar('question_set_sha256', { length: 64 }).notNull(),
+  operatorName: varchar('operator_name', { length: 200 }).notNull(),
+  operatorRole: varchar('operator_role', { length: 150 }).notNull(),
+  decisionBundle: jsonb('decision_bundle').$type<Readonly<Record<string, unknown>>>().notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+}, table => [
+  uniqueIndex('dass21_version_publication_audit_version_uq').on(table.instrumentVersionId),
+  foreignKey({ name: 'dass21_version_publication_audit_identity_fk', columns: [table.instrumentVersionId, table.instrumentId], foreignColumns: [assessmentInstrumentVersions.instrumentVersionId, assessmentInstrumentVersions.instrumentId] }).onDelete('restrict'),
+  check('dass21_version_publication_audit_hash_check', sql`${table.questionSetSha256} ~ '^[a-f0-9]{64}$'`),
+]);
+
 export const assessmentInstrumentQuestions = pgTable('assessment_instrument_questions', {
   instrumentVersionId: uuid('instrument_version_id').notNull().references(() => assessmentInstrumentVersions.instrumentVersionId, { onDelete: 'cascade' }),
   questionId: uuid('question_id').notNull(),

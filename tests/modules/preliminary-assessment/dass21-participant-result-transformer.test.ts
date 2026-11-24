@@ -67,7 +67,7 @@ describe('future DASS-21 participant result DTO projection', () => {
     }
   });
 
-  it('collapses internal denial details to a generic future not_available response', () => {
+  it('collapses internal denial details to a generic not_available response', () => {
     const unavailable = dass21InternalResultSchema.parse({
       schemaVersion: '1.0', resultVersion: 'dass21-internal-result-1.0', status: 'not_available',
       assessmentId: randomUUID(), reason: 'consent_required', limitations: ['not_a_diagnosis', 'not_for_participant_display'],
@@ -79,14 +79,17 @@ describe('future DASS-21 participant result DTO projection', () => {
     });
   });
 
-  it('rejects invalid source scores and keeps the future schema disconnected from current /result OpenAPI', () => {
+  it('rejects invalid source scores and documents the conditional /result contract', () => {
     const internal = internalResult();
     expect(() => toDass21ParticipantResult({
       ...internal,
       dimensions: { ...internal.dimensions, depression: { rawScore: 4, equivalentScore: 7, category: 'normal' } },
     } as never)).toThrow();
-    expect(preliminaryAssessmentSchemas.Dass21ParticipantResultFuture).toHaveProperty('description');
+    expect(preliminaryAssessmentSchemas.Dass21ParticipantResult).toHaveProperty('description');
     expect(preliminaryAssessmentPaths['/api/v1/preliminary-assessments/{id}/result'].get.responses['200'])
-      .toMatchObject({ content: { 'application/json': { schema: { $ref: '#/components/schemas/AssessmentResult' } } } });
+      .toMatchObject({ content: { 'application/json': { schema: { oneOf: [
+        { $ref: '#/components/schemas/AssessmentResult' },
+        { $ref: '#/components/schemas/Dass21ParticipantResultEnvelope' },
+      ] } } } });
   });
 });

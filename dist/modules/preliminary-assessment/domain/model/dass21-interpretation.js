@@ -65,7 +65,7 @@ function categoryForEquivalentScore(dimension, equivalentScore) {
 /**
  * Pure, versioned mapping for an already calculated internal score. It does not score answers,
  * persist interpretation, or expose results. Callers must separately gate use to a professionally
- * approved instrument/version; this module is intentionally not composed into HTTP or scoring flows.
+ * approved instrument/version; the normal HTTP composition delegates that gate to its server-owned registry.
  */
 export function categorizeDass21Score(scoreValue, supportValue) {
     if (typeof scoreValue === 'object' && scoreValue !== null && 'instrumentCode' in scoreValue &&

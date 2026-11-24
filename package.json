@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run --exclude tests/integration/**",
     "test:integration": "vitest run tests/integration",
+    "test:staging:e2e": "vitest run tests/integration/integrated-synthetic-staging.e2e.test.ts",
     "db:migrate:test": "tsx scripts/migrate-test-db.ts",
     "db:migrate:demo": "tsx scripts/migrate-demo-db.ts",
     "demo:verify-db": "tsx scripts/verify-demo-db.ts",
@@ -15,6 +16,7 @@
     "demo:server": "tsx scripts/start-demo-server.ts",
     "demo:conversational": "tsx scripts/run-demo-conversational.ts",
     "dass21:technical-test": "tsx scripts/start-dass21-technical-test.ts",
+    "dass21:publish:local": "tsx scripts/publish-dass21-version.ts",
     "staging:integrated:synthetic": "tsx scripts/start-integrated-synthetic-staging.ts",
     "staging:seed-synthetic-consents": "tsx scripts/seed-integrated-staging-consents.ts",
     "db:migrate:staging": "tsx scripts/migrate-staging-db.ts",

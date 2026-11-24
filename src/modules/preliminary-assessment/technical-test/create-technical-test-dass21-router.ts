@@ -19,7 +19,7 @@ import { ConsentAssessmentAuthorizer } from '../infrastructure/persistence/conse
 import { DrizzleConsentRepository } from '../../consent/infrastructure/persistence/drizzle-consent-repository.js';
 import { DrizzleDass21InternalResultReadUnitOfWork } from '../infrastructure/persistence/drizzle-dass21-internal-result-read-unit-of-work.js';
 import { GetMyTechnicalTestDass21Result } from './get-my-technical-test-dass21-result.js';
-import { ensureDass21TechnicalTestMapping } from './ensure-dass21-technical-test-mapping.js';
+import { ensureDass21TechnicalTestMapping, TECHNICAL_TEST_DASS21_MAPPING_VERSION } from './ensure-dass21-technical-test-mapping.js';
 import { isStagingLoopbackAddress, validateStagingDatabaseUrl } from '../../../shared/infrastructure/database/staging-database-safety.js';
 
 /**
@@ -87,6 +87,11 @@ async function createGuardedTechnicalDass21Router(
     } : {},
     new DrizzlePreliminaryAssessmentRepository(database, TECHNICAL_TEST_DASS21_VERSION_ID),
     new DrizzleAssessmentResponseRepository(database, isTechnicalTestDass21Candidate, TECHNICAL_TEST_DASS21_VERSION_ID),
-    { score, result: technicalResult },
+    {
+      scoreCompleted: (assessmentId, accountId) => score.execute(accountId, {
+        assessmentId, mappingVersion: TECHNICAL_TEST_DASS21_MAPPING_VERSION,
+      }),
+      getResult: (assessmentId, accountId) => technicalResult.execute(assessmentId, accountId),
+    },
   );
 }

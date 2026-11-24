@@ -1,8 +1,14 @@
 # Expediente de revisión profesional DASS-21
 
-**Estado del expediente:** preparado para revisión; no constituye aprobación clínica, ética, jurídica ni autorización de uso.  
+**Estado del expediente:** constancia profesional recibida y registrada para revisión; no constituye por sí sola aprobación institucional, ética, jurídica ni autorización de uso con participantes.  
 **Candidata:** `dass21-spanish-candidate-1.1` — `not_approved` / `not_available`.  
-**Fecha de corte documental:** 2026-11-23.
+**Fecha de corte documental:** 2026-11-24.
+
+## Evidencia profesional recibida
+
+Se recibió `Autorizacion Psicologica.pdf`, fechado 2026-11-23, con SHA-256 `515ab49a1049c7804697a3fd267f1edf491d48439d5c06907b3ba0d10e6d6d8b`. El expediente privado conserva la ruta de origen y metadatos; el PDF no se copia al repositorio. El documento identifica la candidata `dass21-spanish-candidate-1.1` y expresa conformidad profesional para administración, scoring, interpretación convencional no diagnóstica y devolución directa dentro de un alcance descrito como estudiantes autorizados de la Facultad de Ingeniería de UPC durante seis meses. La fecha de inicio del periodo no aparece en el registro.
+
+La apariencia de firma, identidad profesional, credencial y autoridad para ese alcance no han sido autenticadas de forma independiente. La constancia no acredita aprobación institucional/ética, consentimiento y tratamiento de datos, ni políticas de retención/acceso o un protocolo operativo de atención. La cláusula de devolución directa entra en conflicto con la guía oficial DASS: UNSW advierte que los puntajes calculados no deben mostrarse a respondientes ni interpretarse automáticamente. Por tanto, la constancia no se registra como autorización de divulgación y `participantDisclosure` permanece `null` hasta que la discrepancia se resuelva formalmente. [FAQ oficial DASS](https://dass.psy.unsw.edu.au/DASSFAQ.htm).
 
 ## Propósito
 
@@ -22,7 +28,7 @@ Reunir la evidencia técnica disponible y registrar decisiones que deben resolve
 | Scoring | `dass21-score-1.0`: suma de los siete valores 0–3 por dimensión; equivalente = suma bruta ×2 |
 | Categorización preparada | `dass21-conventional-cutoffs-1.0`, rangos convencionales por dimensión; no existe dimensión global |
 | Interpretación | Etiquetas de rangos del instrumento; no son diagnóstico, severidad clínica individual, prueba de ausencia de problemas ni evaluación de riesgo |
-| Estado | Sin revisión profesional documentada, sin aprobación, sin publicación y sin disponibilidad para participantes |
+| Estado | Evidencia profesional recibida para la versión; autenticidad/alcance pendientes de verificación independiente; sin aprobación institucional/ética, publicación o disponibilidad para participantes |
 
 La página oficial de traducciones de Daza indica que sigue el orden del DASS-21 inglés y remite a la clave. La clave oficial consultada coincide con el mapa y el ×2 del motor. Este cotejo técnico no demuestra pertinencia cultural, validez para la población concreta ni aprobación de la interpretación para este proyecto. [Ficha Daza](https://www2.psy.unsw.edu.au/dass/Spanish/Daza.htm), [FAQ UNSW](https://dass.psy.unsw.edu.au/DASSFAQ.htm).
 
@@ -30,10 +36,10 @@ La página oficial de traducciones de Daza indica que sigue el orden del DASS-21
 
 - El motor, categorizador, resolución `optionId` → `scoringValue`, persistencia interna y lectura transaccional existen como componentes internos.
 - La candidata no está cargada en el catálogo y no es seleccionable por el flujo de formularios.
-- `ScoreCompletedDass21Assessment` no está conectado a finalización HTTP, jobs ni automatizaciones.
-- El proveedor de soporte interpretativo predeterminado deniega soporte (`DenyDass21InterpretationSupport`).
-- `GET /api/v1/preliminary-assessments/:id/result` conserva el contrato actual con estados `not_available`; no devuelve puntuaciones ni categorías DASS-21.
-- `dass21-participant-result-1.0` es futuro/documentado; el adaptador puro no está conectado al router.
+- La composición normal conecta `ScoreCompletedDass21Assessment` al cierre HTTP solo para versiones de una política de servidor por versión exacta; el registro de producción permanece vacío.
+- Administración, scoring, soporte interpretativo y divulgación tienen evidencias y decisiones separadas. La constancia es evidencia profesional recibida para administración/scoring/interpretación, pero la vinculación a las implementaciones exactas y su autenticidad/alcance requieren revisión; no hay entradas de autorización productivas registradas. `participantDisclosure` sigue denegado por la discrepancia con la guía oficial.
+- `GET /api/v1/preliminary-assessments/:id/result` conserva el contrato histórico sin scores cuando la versión no está registrada. Para una versión registrada, la ruta solo devuelve `{ result: available }` si divulgación y soporte están autorizados; de lo contrario devuelve `{ result: not_available }` sin dimensiones.
+- `dass21-participant-result-1.0` y su adaptador están conectados de forma condicional, pero no hay versión disponible en la composición normal actual.
 - No hay endpoint de lectura para investigadores/profesionales ni roles de estudio implementados.
 - Safety y seguimiento longitudinal real permanecen inactivos.
 
@@ -47,8 +53,8 @@ La evidencia peruana citada por el expediente de 8A.7 estudia 1.163 estudiantes 
 
 1. Revisar la [matriz de decisiones](dass21-authorization-decision-matrix.md); completar responsable identificado, decisión, evidencia, referencia y fecha solo cuando ocurra una revisión real.
 2. Evaluar los escenarios y checklists independientes en la [propuesta de divulgación](dass21-results-disclosure-proposal.md).
-3. Contrastar el contrato futuro con la [guía frontend DASS-21](frontend-dass21-results-contract.md). El documento futuro no es una API habilitada.
-4. Adjuntar aprobaciones reales en el repositorio de investigación institucional o citar una referencia controlada; no agregar nombres, firmas ni aprobaciones supuestas a estos documentos.
+3. Contrastar el contrato condicionado con la [guía frontend DASS-21](frontend-dass21-results-contract.md). La ruta conserva el estado histórico actual mientras el registro de producción esté vacío.
+4. Verificar por un canal institucional la firma, credencial, autoridad y periodo de la constancia; registrar aprobaciones institucionales/éticas y las decisiones pendientes mediante referencias controladas. No agregar nombres, firmas ni aprobaciones supuestas a estos documentos.
 
 ## Evidencia técnica de verificación
 
@@ -58,4 +64,4 @@ El contexto del Sprint informa 417 pruebas unitarias y 5/5 pruebas PostgreSQL ap
 
 ## Condición actual
 
-La candidata sigue bloqueada para cargar en un catálogo habilitado, administrar a participantes, calcular/persistir resultados de participantes y publicar resultados. La revisión del expediente puede continuar sin cambiar ese estado.
+La candidata sigue bloqueada para administración con participantes y para disponibilidad normal: no se verificó el UUID de versión ni el hash del conjunto persistido en la base destino; la constancia tiene alcance acotado y autenticidad/autoridad no verificadas; faltan aprobaciones institucionales/éticas y decisiones de consentimiento, privacidad, retención/acceso y protocolo operativo. La devolución permanece bloqueada separadamente. La recepción de la constancia no cambia `not_approved` ni `not_available`.

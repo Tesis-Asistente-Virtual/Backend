@@ -27,9 +27,9 @@ export class PreliminaryAssessmentController {
     private readonly reauthorizeAssessment: ReauthorizeAssessment,
     private readonly getResult: GetMyAssessmentResult,
     private readonly formMetadata?: (instrumentVersionId: string) => Readonly<Record<string, unknown>>,
-    private readonly technicalResult?: {
+    private readonly dass21Http?: {
       scoreCompleted(assessmentId: string, accountId: string): Promise<unknown>;
-      getResult(assessmentId: string, accountId: string): Promise<unknown>;
+      getResult(assessmentId: string, accountId: string): Promise<unknown | null>;
     },
   ) {}
 
@@ -117,7 +117,7 @@ export class PreliminaryAssessmentController {
     const { id } = assessmentIdParamsSchema.parse(req.params);
     emptyAssessmentBodySchema.parse(req.body ?? {});
     const completed = await this.completeAssessment.execute(id, accountId);
-    await this.technicalResult?.scoreCompleted(id, accountId);
+    await this.dass21Http?.scoreCompleted(id, accountId);
     res.status(200).json({ assessment: toAssessmentResource(completed.assessment), result: toAssessmentResultResource(completed.result) });
   }
 
@@ -125,10 +125,8 @@ export class PreliminaryAssessmentController {
     const accountId = req.auth?.accountId;
     if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
     const { id } = assessmentIdParamsSchema.parse(req.params);
-    if (this.technicalResult) {
-      res.status(200).json(await this.technicalResult.getResult(id, accountId));
-      return;
-    }
+    const dass21Result = await this.dass21Http?.getResult(id, accountId);
+    if (dass21Result !== null && dass21Result !== undefined) { res.status(200).json({ result: dass21Result }); return; }
     res.status(200).json(toAssessmentResultResource(await this.getResult.execute(id, accountId)));
   }
 }

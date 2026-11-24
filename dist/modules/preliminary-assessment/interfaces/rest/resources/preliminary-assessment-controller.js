@@ -14,8 +14,8 @@ export class PreliminaryAssessmentController {
     reauthorizeAssessment;
     getResult;
     formMetadata;
-    technicalResult;
-    constructor(info, start, list, get, getForm, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, reauthorizeAssessment, getResult, formMetadata, technicalResult) {
+    dass21Http;
+    constructor(info, start, list, get, getForm, submitResponse, pauseAssessment, resumeAssessment, withdrawAssessment, completeAssessment, reauthorizeAssessment, getResult, formMetadata, dass21Http) {
         this.info = info;
         this.start = start;
         this.list = list;
@@ -29,7 +29,7 @@ export class PreliminaryAssessmentController {
         this.reauthorizeAssessment = reauthorizeAssessment;
         this.getResult = getResult;
         this.formMetadata = formMetadata;
-        this.technicalResult = technicalResult;
+        this.dass21Http = dass21Http;
     }
     async assessmentInfo(_req, res) {
         const info = await this.info.execute();
@@ -130,7 +130,7 @@ export class PreliminaryAssessmentController {
         const { id } = assessmentIdParamsSchema.parse(req.params);
         emptyAssessmentBodySchema.parse(req.body ?? {});
         const completed = await this.completeAssessment.execute(id, accountId);
-        await this.technicalResult?.scoreCompleted(id, accountId);
+        await this.dass21Http?.scoreCompleted(id, accountId);
         res.status(200).json({ assessment: toAssessmentResource(completed.assessment), result: toAssessmentResultResource(completed.result) });
     }
     async result(req, res) {
@@ -140,8 +140,9 @@ export class PreliminaryAssessmentController {
             return;
         }
         const { id } = assessmentIdParamsSchema.parse(req.params);
-        if (this.technicalResult) {
-            res.status(200).json(await this.technicalResult.getResult(id, accountId));
+        const dass21Result = await this.dass21Http?.getResult(id, accountId);
+        if (dass21Result !== null && dass21Result !== undefined) {
+            res.status(200).json({ result: dass21Result });
             return;
         }
         res.status(200).json(toAssessmentResultResource(await this.getResult.execute(id, accountId)));

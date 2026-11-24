@@ -16,7 +16,7 @@ const participantLimitations = z.tuple([
     z.literal('not_derived_from_conversation'),
     z.literal('not_for_automated_treatment_or_safety_decisions'),
 ]);
-/** Future public DTO. It is deliberately not referenced by the current /result route. */
+/** Public projection only after the exact-version server disclosure policy authorizes it. */
 export const dass21ParticipantResultSchema = z.discriminatedUnion('status', [
     z.object({
         contractVersion: z.literal(DASS21_PARTICIPANT_RESULT_CONTRACT_VERSION),

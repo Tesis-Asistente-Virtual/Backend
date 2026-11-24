@@ -7,7 +7,7 @@ import { PreliminaryAssessmentError } from '../../../domain/model/assessment-err
 import type { Dass21InternalResultReadUnitOfWork } from '../../ports/dass21-internal-result-read-unit-of-work.js';
 import type { Dass21InterpretationSupportProvider } from '../../ports/dass21-interpretation-support-provider.js';
 
-/** Internal-only reader. It is not composed into REST, jobs, or participant workflows. */
+/** Transactional internal reader. HTTP uses its DTO only after separate server-side disclosure authorization. */
 export class GetMyInternalDass21Result {
   constructor(
     private readonly reads: Dass21InternalResultReadUnitOfWork,

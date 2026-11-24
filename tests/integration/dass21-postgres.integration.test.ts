@@ -26,21 +26,41 @@ import type { InstrumentVersion } from '../../src/modules/preliminary-assessment
 import type { Dass21QuestionMapping } from '../../src/modules/preliminary-assessment/domain/model/dass21-question-mapping.js';
 import type { NewInstrumentDraft } from '../../src/modules/preliminary-assessment/domain/repositories/instrument-catalog.js';
 import { createPreliminaryAssessmentRouter } from '../../src/modules/preliminary-assessment/interfaces/rest/create-preliminary-assessment-router.js';
+import { DASS21_INSTRUMENT_ID, Dass21VersionAuthorizationRegistry } from '../../src/modules/preliminary-assessment/application/internal/services/dass21-version-authorization-registry.js';
 import { errorHandler } from '../../src/shared/infrastructure/http/error-handler.js';
 import { connectTestDatabase } from './test-database.js';
 import { acquirePreliminaryAssessmentNoticeLock } from './preliminary-assessment-notice-lock.js';
 
 type TestDb = Awaited<ReturnType<typeof connectTestDatabase>>['db'];
-const fixtureInstrumentId = '00000000-0000-4000-8000-00000000b501';
-const fixtureInstrumentVersionId = '00000000-0000-4000-8000-00000000b502';
-const fallbackInstrumentVersionId = '00000000-0000-4000-8000-00000000b504';
+const fixtureInstrumentId = DASS21_INSTRUMENT_ID;
+// Approved instrument fixtures are immutable and retained, so every Vitest process
+// gets a fresh exact version identity instead of colliding with prior runs.
+const fixtureRunId = randomUUID().replaceAll('-', '').slice(0, 24);
+const fixtureInstrumentVersionId = randomUUID();
+const fixtureInstrumentVersion = `synthetic-it-${fixtureRunId}`;
 const fixtureMappingVersion = 'synthetic-map-1';
 const fixtureQuestions = Array.from({ length: 21 }, (_, index) => ({
-  id: `00000000-0000-4000-8000-${(index + 0xb510).toString(16).padStart(12, '0')}`,
-  prompt: `Synthetic numeric integration item ${index + 1}.`, responseType: 'number' as const,
-  required: true, minimum: 0, maximum: 3, displayOrder: index + 1,
+  id: randomUUID(),
+  prompt: `Synthetic single-choice integration item ${index + 1}.`, responseType: 'single_choice' as const,
+  required: true, displayOrder: index + 1,
+  options: Array.from({ length: 4 }, (_, value) => ({ id: `fixture-option-${value}`, label: `Synthetic option ${value}`, scoringValue: value })),
 }));
 const testJwt = new JwtAccessTokenService('dass21-postgres-integration-only-secret-with-sufficient-entropy', 'dass21-integration', 'dass21-test-client', 300);
+
+function testAuthorizationRegistry(disclose: boolean): Dass21VersionAuthorizationRegistry {
+  const evidence = {
+    evidenceReference: 'TEST ONLY: isolated synthetic fixture; not professional approval',
+    scope: 'tesis_test_db integration only', responsible: 'automated test fixture', authorizedAt: new Date(Date.now() - 60_000),
+  };
+  const versions = [[fixtureInstrumentVersionId, fixtureInstrumentVersion]] as const;
+  return new Dass21VersionAuthorizationRegistry(versions.map(([instrumentVersionId, instrumentVersion]) => ({
+    instrumentCode: 'DASS-21', instrumentId: fixtureInstrumentId, instrumentVersionId, instrumentVersion,
+    administration: evidence,
+    scoring: { ...evidence, mappingVersion: fixtureMappingVersion, scoringVersion: 'dass21-score-1.0' },
+    interpretation: { ...evidence, scoringVersion: 'dass21-score-1.0', interpretationVersion: 'dass21-conventional-cutoffs-1.0' },
+    participantDisclosure: disclose ? { ...evidence, resultContractVersion: 'dass21-participant-result-1.0' } : null,
+  })), [fixtureInstrumentId]);
+}
 
 function postgresCode(error: unknown): string | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
@@ -63,6 +83,7 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
   const accountIds = new Set<string>();
   const draftNoticeIds = new Set<string>();
   const draftMappingIds = new Set<string>();
+  const draftInstrumentVersionIds = new Set<string>();
 
   async function account(): Promise<string> {
     const id = randomUUID();
@@ -118,31 +139,25 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
 
   async function approvedSyntheticInstrument(): Promise<InstrumentVersion> {
     const catalog = new DrizzleInstrumentCatalog(db);
-    const original = await catalog.findVersion(fixtureInstrumentId, fixtureInstrumentVersionId);
-    if (original?.status === 'approved' && isInstrumentAvailable(original)) return original;
-
-    // 0007 intentionally leaves historical approved questions without display_order unchanged.
-    // Such immutable fixtures cannot be repaired in place, so use a new synthetic version.
-    const useFallbackVersion = Boolean(original && original.status !== 'draft');
-    const instrumentVersionId = useFallbackVersion ? fallbackInstrumentVersionId : fixtureInstrumentVersionId;
-    const version = useFallbackVersion ? 'synthetic-integration-v2' : 'synthetic-integration-v1';
-    const found = useFallbackVersion ? await catalog.findVersion(fixtureInstrumentId, fallbackInstrumentVersionId) : original;
+    const found = await catalog.findVersion(fixtureInstrumentId, fixtureInstrumentVersionId);
     if (found?.status === 'approved' && isInstrumentAvailable(found)) return found;
-    if (found && found.status !== 'draft') throw new Error('Reserved synthetic DASS infrastructure fixture is not approved and ordered');
+    if (found && found.status !== 'draft') throw new Error('Run-unique synthetic DASS fixture has an unexpected immutable state');
     const draft: NewInstrumentDraft = {
-      instrumentId: fixtureInstrumentId, instrumentVersionId,
-      version, effectiveAt: new Date(Date.now() - 60_000), status: 'draft', questions: fixtureQuestions,
+      instrumentId: fixtureInstrumentId, instrumentVersionId: fixtureInstrumentVersionId,
+      version: fixtureInstrumentVersion, effectiveAt: new Date(Date.now() - 60_000), status: 'draft', questions: fixtureQuestions,
       approval: { status: 'pending', approvedAt: null, approvalReference: null },
       license: { status: 'not_reviewed', reference: null },
     };
     if (found) await catalog.updateDraft(draft);
     else await catalog.createDraft(draft);
-    const approved = await catalog.publishVersion(instrumentVersionId, {
+    draftInstrumentVersionIds.add(fixtureInstrumentVersionId);
+    const approved = await catalog.publishVersion(fixtureInstrumentVersionId, {
       approval: { status: 'approved', approvedAt: new Date(), approvalReference: 'TEST ONLY: synthetic infrastructure fixture' },
       license: { status: 'not_applicable', reference: 'Synthetic fixture; not an instrument license determination' },
       effectiveAt: draft.effectiveAt,
     });
     if (!approved) throw new Error('Synthetic infrastructure fixture could not be published in test DB');
+    draftInstrumentVersionIds.delete(fixtureInstrumentVersionId);
     return approved;
   }
 
@@ -156,8 +171,11 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
       mappingVersion: fixtureMappingVersion, status: 'draft', createdAt: new Date(Date.now() - 1_000), frozenAt: null,
       entries: fixtureQuestions.map((question, index) => ({ questionId: question.id, itemNumber: index + 1 })),
     };
+    draftMappingIds.add(mapping.mappingId);
     await repo.saveDraft(mapping);
-    return repo.freeze(mapping.mappingId, instrument.instrumentVersionId, mapping.mappingVersion, new Date());
+    const frozen = await repo.freeze(mapping.mappingId, instrument.instrumentVersionId, mapping.mappingVersion, new Date());
+    draftMappingIds.delete(mapping.mappingId);
+    return frozen;
   }
 
   async function assessmentWithScore(ownerId: string, noticeId: string, instrument: InstrumentVersion, mapping: Dass21QuestionMapping) {
@@ -172,8 +190,12 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
     const responses = new DrizzleAssessmentResponseRepository(db);
     for (const [index, question] of instrument.questions.entries()) {
       const at = new Date(start.getTime() + index + 1);
+      const value = index % 4;
+      const answer = question.responseType === 'single_choice'
+        ? { type: 'single_choice' as const, optionId: question.options[value]?.id ?? '' }
+        : { type: 'number' as const, value };
       await responses.saveForOwner({ assessmentId: created.assessmentId, instrumentVersionId: instrument.instrumentVersionId,
-        questionId: question.id, status: 'answered', answer: { type: 'number', value: index % 4 }, createdAt: at, updatedAt: at }, ownerId);
+        questionId: question.id, status: 'answered', answer, createdAt: at, updatedAt: at }, ownerId);
     }
     const withResponses = await assessments.findByIdForOwner(created.assessmentId, ownerId);
     if (!withResponses) throw new Error('Synthetic assessment fixture could not be loaded');
@@ -191,7 +213,12 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
     noticeLock = await acquirePreliminaryAssessmentNoticeLock(pool);
     const app = express();
     app.use(express.json());
-    app.use('/api/v1/preliminary-assessments', createPreliminaryAssessmentRouter(db, testJwt));
+    // Exercise the production router factory at its canonical URL with a
+    // test-only authorization registry; keep the real production registry
+    // mounted separately to assert that the candidate remains unavailable.
+    app.use('/api/v1/preliminary-assessments', createPreliminaryAssessmentRouter(db, testJwt, testAuthorizationRegistry(true)));
+    app.use('/default/api/v1/preliminary-assessments', createPreliminaryAssessmentRouter(db, testJwt));
+    app.use('/restricted/api/v1/preliminary-assessments', createPreliminaryAssessmentRouter(db, testJwt, testAuthorizationRegistry(false)));
     app.use(errorHandler);
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve, reject) => { server?.once('listening', resolve); server?.once('error', reject); });
@@ -208,7 +235,12 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
       await pool.query('DELETE FROM assessment_scoring_item_mappings WHERE mapping_id = ANY($1::uuid[])', [mappingIds]);
       await pool.query("DELETE FROM assessment_scoring_mapping_versions WHERE mapping_id = ANY($1::uuid[]) AND status = 'draft'", [mappingIds]);
     }
-    // Approved synthetic instrument and frozen mapping fixtures are immutable and retained for reuse in tesis_test_db only.
+    const instrumentVersionIds = [...draftInstrumentVersionIds]; draftInstrumentVersionIds.clear();
+    if (instrumentVersionIds.length > 0) {
+      await pool.query('DELETE FROM assessment_instrument_questions WHERE instrument_version_id = ANY($1::uuid[])', [instrumentVersionIds]);
+      await pool.query("DELETE FROM assessment_instrument_versions WHERE instrument_version_id = ANY($1::uuid[]) AND status = 'draft'", [instrumentVersionIds]);
+    }
+    // Approved instrument versions and frozen mappings are immutable and retained; their run-unique IDs prevent reuse collisions.
   });
 
   afterAll(async () => {
@@ -310,7 +342,9 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
     }), '23514');
 
     const token = await testJwt.issue(ownerId);
-    const response = await fetch(`${baseUrl}/api/v1/preliminary-assessments/${completed.assessmentId}/result`, { headers: { authorization: `Bearer ${token}` } });
+    // This assertion targets the production-default policy instance, not the
+    // canonical test-only router configured with explicit disclosure above.
+    const response = await fetch(`${baseUrl}/default/api/v1/preliminary-assessments/${completed.assessmentId}/result`, { headers: { authorization: `Bearer ${token}` } });
     expect(response.status).toBe(200);
     const publicBody = await response.text();
     expect(publicBody).toContain('not_available');
@@ -344,6 +378,109 @@ describe('DASS-21 infrastructure PostgreSQL integration (synthetic fixtures only
     }), '23514');
     expect(await db.select().from(assessmentPsychometricScores).where(eq(assessmentPsychometricScores.assessmentId, incomplete!.assessmentId))).toHaveLength(0);
   });
+
+  it('runs the normal HTTP composition with two isolated synthetic owners and separates scoring from disclosure', async () => {
+    const instrument = await approvedSyntheticInstrument();
+    const mapping = await frozenMapping(instrument);
+    const ownerA = await account();
+    const ownerB = await account();
+    const noConsentOwner = await account();
+    const noticeA = await grant(ownerA);
+    const noticeB = await grant(ownerB);
+    const tokenA = await testJwt.issue(ownerA);
+    const tokenB = await testJwt.issue(ownerB);
+    const tokenWithoutConsent = await testJwt.issue(noConsentOwner);
+    const root = '/api/v1/preliminary-assessments';
+    const http = (path: string, token: string, method = 'GET', body?: unknown) => fetch(`${baseUrl}${root}${path}`, {
+      method, headers: { authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+    const deniedStart = await http('', tokenWithoutConsent, 'POST', { instrumentVersionId: instrument.instrumentVersionId });
+    expect(deniedStart.status).toBe(403);
+    expect(await db.select().from(preliminaryAssessments).where(eq(preliminaryAssessments.accountId, noConsentOwner))).toHaveLength(0);
+
+    const infoResponse = await http('/info', tokenA);
+    const info = await infoResponse.json() as { instruments: Array<{ instrumentVersionId: string }> };
+    expect(infoResponse.status).toBe(200);
+    expect(info.instruments.some(candidate => candidate.instrumentVersionId === instrument.instrumentVersionId)).toBe(true);
+    const normalInfoResponse = await fetch(`${baseUrl}/default/api/v1/preliminary-assessments/info`, { headers: { authorization: `Bearer ${tokenA}` } });
+    const normalInfo = await normalInfoResponse.json() as { instruments: Array<{ instrumentVersionId: string }> };
+    expect(normalInfoResponse.status).toBe(200);
+    expect(normalInfo.instruments.some(candidate => candidate.instrumentVersionId === instrument.instrumentVersionId)).toBe(false);
+    const normalStart = await fetch(`${baseUrl}/default/api/v1/preliminary-assessments`, {
+      method: 'POST', headers: { authorization: `Bearer ${tokenA}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ instrumentVersionId: instrument.instrumentVersionId }),
+    });
+    expect(normalStart.status).toBe(409);
+    expect(await db.select().from(preliminaryAssessments).where(eq(preliminaryAssessments.accountId, ownerA))).toHaveLength(0);
+
+    const collect = async (token: string, values: (displayOrder: number) => number) => {
+      const startResponse = await http('', token, 'POST', { instrumentVersionId: instrument.instrumentVersionId });
+      expect(startResponse.status).toBe(201);
+      const assessment = await startResponse.json() as { id: string };
+      const formResponse = await http(`/${assessment.id}/form`, token);
+      expect(formResponse.status).toBe(200);
+      const form = await formResponse.json() as { instrument: { questions: Array<{
+        id: string; displayOrder: number; responseType: 'number' | 'single_choice'; options?: Array<{ id: string }>;
+      }> } };
+      expect(form.instrument.questions).toHaveLength(21);
+      for (const question of form.instrument.questions) {
+        const value = values(question.displayOrder);
+        const selectedOption = question.responseType === 'single_choice' ? question.options?.[value] : undefined;
+        if (question.responseType === 'single_choice' && !selectedOption) throw new Error('Synthetic DASS item is missing its selected option');
+        const answer = question.responseType === 'single_choice'
+          ? { type: 'single_choice', optionId: selectedOption!.id }
+          : { type: 'number', value };
+        const response = await http(`/${assessment.id}/responses`, token, 'POST', {
+          questionId: question.id, answer,
+        });
+        expect(response.status).toBe(200);
+      }
+      const complete = await http(`/${assessment.id}/complete`, token, 'POST', {});
+      expect(complete.status).toBe(200);
+      expect(await db.select().from(assessmentPsychometricScores).where(eq(assessmentPsychometricScores.assessmentId, assessment.id))).toHaveLength(1);
+      return assessment.id;
+    };
+
+    const assessmentA = await collect(tokenA, displayOrder => displayOrder % 4);
+    const assessmentB = await collect(tokenB, () => 0);
+    const resultAResponse = await http(`/${assessmentA}/result`, tokenA);
+    const resultBResponse = await http(`/${assessmentB}/result`, tokenB);
+    expect(resultAResponse.status).toBe(200);
+    expect(resultBResponse.status).toBe(200);
+    const resultA = await resultAResponse.json() as { result: { status: string; assessmentId: string; dimensions: Record<string, { rawScore: number; equivalentScore: number; category: string }>; isDiagnostic: boolean } };
+    const resultB = await resultBResponse.json() as { result: { status: string; assessmentId: string; dimensions: Record<string, { rawScore: number; equivalentScore: number; category: string }>; isDiagnostic: boolean } };
+    expect(resultA.result).toMatchObject({ status: 'available', assessmentId: assessmentA, isDiagnostic: false, dimensions: {
+      depression: { rawScore: 9, equivalentScore: 18, category: 'moderate' },
+      anxiety: { rawScore: 12, equivalentScore: 24, category: 'extremely_severe' },
+      stress: { rawScore: 10, equivalentScore: 20, category: 'moderate' },
+    } });
+    expect(resultB.result).toMatchObject({ status: 'available', assessmentId: assessmentB, isDiagnostic: false, dimensions: {
+      depression: { rawScore: 0, equivalentScore: 0, category: 'normal' },
+      anxiety: { rawScore: 0, equivalentScore: 0, category: 'normal' },
+      stress: { rawScore: 0, equivalentScore: 0, category: 'normal' },
+    } });
+    expect(resultA.result.dimensions).not.toEqual(resultB.result.dimensions);
+    expect((await http(`/${assessmentB}/result`, tokenA)).status).toBe(404);
+    expect((await http(`/${assessmentA}/result`, tokenB)).status).toBe(404);
+
+    const restrictedRoot = '/restricted/api/v1/preliminary-assessments';
+    const restricted = await fetch(`${baseUrl}${restrictedRoot}/${assessmentA}/result`, { headers: { authorization: `Bearer ${tokenA}` } });
+    const restrictedText = await restricted.text();
+    expect(restricted.status).toBe(200);
+    expect(restrictedText).toContain('"status":"not_available"');
+    for (const forbidden of ['dimensions', 'rawScore', 'equivalentScore', 'category']) expect(restrictedText).not.toContain(forbidden);
+
+    const normal = await fetch(`${baseUrl}/default/api/v1/preliminary-assessments/${assessmentA}/result`, { headers: { authorization: `Bearer ${tokenA}` } });
+    const normalText = await normal.text();
+    expect(normal.status).toBe(200);
+    expect(normalText).toContain('not_available');
+    for (const forbidden of ['dimensions', 'rawScore', 'equivalentScore', 'category']) expect(normalText).not.toContain(forbidden);
+
+    expect(await db.select().from(accountConsentEvents).where(and(eq(accountConsentEvents.accountId, ownerA), eq(accountConsentEvents.noticeVersionId, noticeA)))).not.toHaveLength(0);
+    expect(await db.select().from(accountConsentEvents).where(and(eq(accountConsentEvents.accountId, ownerB), eq(accountConsentEvents.noticeVersionId, noticeB)))).not.toHaveLength(0);
+  }, 45_000);
 
   it('serializes score writing against concurrent consent withdrawal', async () => {
     const ownerId = await account();

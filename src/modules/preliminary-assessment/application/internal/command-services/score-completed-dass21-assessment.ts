@@ -18,8 +18,9 @@ const commandSchema = z.object({
 export type ScoreCompletedDass21AssessmentCommand = z.infer<typeof commandSchema>;
 
 /**
- * Internal orchestration only. It is intentionally not registered in REST,
- * background jobs, chat flows, or application composition in this increment.
+ * Internal orchestration invoked only by the normal assessment composition's
+ * server-owned exact-version authorization registry. It is never called from
+ * chat, background jobs, or client-supplied scoring data.
  */
 export class ScoreCompletedDass21Assessment {
   constructor(

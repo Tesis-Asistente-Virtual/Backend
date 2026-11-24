@@ -18,8 +18,7 @@ import { CompleteAssessment } from '../../application/internal/command-services/
 import { ReauthorizeAssessment } from '../../application/internal/command-services/reauthorize-assessment.js';
 import { PreliminaryAssessmentController } from './resources/preliminary-assessment-controller.js';
 import { isInstrumentAvailable } from '../../domain/model/instrument.js';
-import { TECHNICAL_TEST_DASS21_MAPPING_VERSION } from '../../technical-test/ensure-dass21-technical-test-mapping.js';
-export function composePreliminaryAssessmentRouter(database, jwt, availability = instrument => isInstrumentAvailable(instrument), catalogOverride, formMetadata, assessmentRepositoryOverride, responseRepositoryOverride, technicalDass21) {
+export function composePreliminaryAssessmentRouter(database, jwt, availability = instrument => isInstrumentAvailable(instrument), catalogOverride, formMetadata, assessmentRepositoryOverride, responseRepositoryOverride, dass21Http) {
     const router = Router();
     if (!database || !jwt) {
         for (const [method, path] of [
@@ -36,12 +35,7 @@ export function composePreliminaryAssessmentRouter(database, jwt, availability =
     const results = new DrizzleAssessmentResultRepository(database);
     const instruments = catalogOverride ?? new DrizzleInstrumentCatalog(database);
     const consent = new ConsentAssessmentAuthorizer(new DrizzleConsentRepository(database));
-    const controller = new PreliminaryAssessmentController(new GetAssessmentInfo(instruments, () => new Date(), availability), new StartPreliminaryAssessment(assessments, instruments, consent, () => new Date(), availability), new ListMyAssessments(assessments, consent), new GetMyAssessment(assessments, consent), new GetMyAssessmentForm(assessments, instruments, consent, () => new Date(), availability), new SubmitAssessmentResponse(assessments, responses, instruments, consent, () => new Date(), availability), new PauseAssessment(new ChangeAssessmentState(assessments, consent)), new ResumeAssessment(new ChangeAssessmentState(assessments, consent)), new WithdrawAssessment(new ChangeAssessmentState(assessments, consent)), new CompleteAssessment(assessments, results, instruments, consent, () => new Date(), availability), new ReauthorizeAssessment(assessments, consent), new GetMyAssessmentResult(assessments, results), formMetadata, technicalDass21 ? {
-        scoreCompleted: (assessmentId, accountId) => technicalDass21.score.execute(accountId, {
-            assessmentId, mappingVersion: TECHNICAL_TEST_DASS21_MAPPING_VERSION,
-        }),
-        getResult: (assessmentId, accountId) => technicalDass21.result.execute(assessmentId, accountId),
-    } : undefined);
+    const controller = new PreliminaryAssessmentController(new GetAssessmentInfo(instruments, () => new Date(), availability), new StartPreliminaryAssessment(assessments, instruments, consent, () => new Date(), availability), new ListMyAssessments(assessments, consent), new GetMyAssessment(assessments, consent), new GetMyAssessmentForm(assessments, instruments, consent, () => new Date(), availability), new SubmitAssessmentResponse(assessments, responses, instruments, consent, () => new Date(), availability), new PauseAssessment(new ChangeAssessmentState(assessments, consent)), new ResumeAssessment(new ChangeAssessmentState(assessments, consent)), new WithdrawAssessment(new ChangeAssessmentState(assessments, consent)), new CompleteAssessment(assessments, results, instruments, consent, () => new Date(), availability), new ReauthorizeAssessment(assessments, consent), new GetMyAssessmentResult(assessments, results), formMetadata, dass21Http);
     const auth = authenticationMiddleware(jwt);
     router.get('/info', auth, (req, res, next) => { void controller.assessmentInfo(req, res).catch(next); });
     router.post('/', auth, (req, res, next) => { void controller.startAssessment(req, res).catch(next); });

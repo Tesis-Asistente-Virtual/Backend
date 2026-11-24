@@ -59,9 +59,13 @@ export const preliminaryAssessmentSchemas = {
     AssessmentResponseItem: toSchema(answerResource),
     AssessmentPage: pageSchema(assessmentResource),
     AssessmentResult: toSchema(resultResource),
-    Dass21ParticipantResultFuture: {
+    Dass21ParticipantResult: {
         ...toSchema(dass21ParticipantResultSchema),
-        description: 'Contrato futuro preparado, no habilitado ni conectado a ninguna ruta. No usar como respuesta actual de /result.',
+        description: 'Contrato condicionado a autorización de divulgación del servidor para la versión exacta; incluye available o not_available y no constituye diagnóstico.',
+    },
+    Dass21ParticipantResultEnvelope: {
+        type: 'object', properties: { result: { $ref: '#/components/schemas/Dass21ParticipantResult' } },
+        required: ['result'], additionalProperties: false,
     },
     AssessmentForm: {
         type: 'object', properties: {
@@ -91,7 +95,7 @@ const standardErrors = errorResponses(['400', '401', '403', '404', '409', '500']
 export const preliminaryAssessmentPaths = {
     '/api/v1/preliminary-assessments/info': {
         get: {
-            tags: ['Preliminary Assessment'], summary: 'Consultar disponibilidad de instrumentos aprobados y vigentes', security,
+            tags: ['Preliminary Assessment'], summary: 'Consultar disponibilidad de instrumentos aprobados, vigentes y autorizados por el servidor', security,
             responses: {
                 '200': response('Disponibilidad; instruments vacío significa que no hay instrumento utilizable', '#/components/schemas/AssessmentInfo'),
                 ...errorResponses(['401', '500']),
@@ -100,8 +104,8 @@ export const preliminaryAssessmentPaths = {
     },
     '/api/v1/preliminary-assessments': {
         post: {
-            tags: ['Preliminary Assessment'], summary: 'Iniciar evaluación con instrumento aprobado',
-            description: 'Requiere consentimiento vigente para preliminary_assessment. No se crean evaluaciones cuando no hay instrumento disponible.',
+            tags: ['Preliminary Assessment'], summary: 'Iniciar evaluación con instrumento disponible y autorizado',
+            description: 'Requiere consentimiento vigente para preliminary_assessment. DASS-21 requiere además autorización del servidor ligada a la versión exacta; el cliente no puede solicitar versiones no disponibles.',
             security,
             requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/StartAssessmentRequest' } } } },
             responses: { '201': response('Evaluación iniciada', '#/components/schemas/AssessmentResponse'), ...standardErrors },
@@ -155,10 +159,10 @@ export const preliminaryAssessmentPaths = {
     '/api/v1/preliminary-assessments/{id}/complete': {
         post: {
             tags: ['Preliminary Assessment'], summary: 'Finalizar evaluación',
-            description: 'Guarda el estado final y el resultado no puntuado de forma atómica e idempotente.', security, parameters: [idParam],
+            description: 'Guarda el estado final y el AssessmentResult histórico no disponible de forma atómica e idempotente. Si la versión DASS-21 tiene autorización de scoring del servidor, el scoring interno se ejecuta después de completar y persiste de forma idempotente; no se calcula desde conversación ni datos del cliente.', security, parameters: [idParam],
             responses: {
                 '200': {
-                    description: 'Evaluación completada y resultado no clínico',
+                    description: 'Evaluación completada y resultado histórico no clínico; un scoring DASS-21 interno autorizado permanece separado de esta respuesta.',
                     content: { 'application/json': { schema: {
                                 type: 'object',
                                 properties: { assessment: { $ref: '#/components/schemas/AssessmentResponse' }, result: { $ref: '#/components/schemas/AssessmentResult' } },
@@ -172,8 +176,14 @@ export const preliminaryAssessmentPaths = {
     '/api/v1/preliminary-assessments/{id}/result': {
         get: {
             tags: ['Preliminary Assessment'], summary: 'Consultar resultado propio',
-            description: 'Contrato actualmente disponible: AssessmentResult con puntuaciones, interpretación y prioridad not_available. No devuelve scores ni categorías DASS-21. Dass21ParticipantResultFuture es solo una especificación no habilitada y no describe la respuesta de esta ruta. El resultado actual no constituye diagnóstico.', security, parameters: [idParam],
-            responses: { '200': response('Resultado orientativo no clínico', '#/components/schemas/AssessmentResult'), ...errorResponses(['401', '404', '500']) },
+            description: 'Para instrumentos históricos/no DASS conserva AssessmentResult. Para una versión DASS-21 exacta registrada en la política del servidor, devuelve { result: Dass21ParticipantResult }; sin autorización independiente de divulgación, result.status es not_available y no incluye dimensiones. Hoy no hay versiones DASS-21 autorizadas en la composición normal. Ownership y evaluación completada son obligatorios.', security, parameters: [idParam],
+            responses: { '200': {
+                    description: 'Resultado histórico no disponible o resultado DASS-21 bajo autorización exacta del servidor',
+                    content: { 'application/json': { schema: { oneOf: [
+                                    { $ref: '#/components/schemas/AssessmentResult' },
+                                    { $ref: '#/components/schemas/Dass21ParticipantResultEnvelope' },
+                                ] } } },
+                }, ...errorResponses(['401', '404', '500']) },
         },
     },
 };

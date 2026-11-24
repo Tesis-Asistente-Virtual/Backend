@@ -78,6 +78,13 @@
       "when": 1795459385000,
       "tag": "0010_technical_test_dass21_mapping",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795495176571,
+      "tag": "0011_dass21_publication_audit",
+      "breakpoints": true
     }
   ]
 }

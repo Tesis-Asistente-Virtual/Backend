@@ -24,9 +24,6 @@ import { isInstrumentAvailable, type InstrumentAvailabilityPolicy } from '../../
 import type { InstrumentCatalog } from '../../domain/repositories/instrument-catalog.js';
 import type { PreliminaryAssessmentRepository } from '../../domain/repositories/preliminary-assessment-repository.js';
 import type { AssessmentResponseRepository } from '../../domain/repositories/assessment-response-repository.js';
-import type { ScoreCompletedDass21Assessment } from '../../application/internal/command-services/score-completed-dass21-assessment.js';
-import type { GetMyTechnicalTestDass21Result } from '../../technical-test/get-my-technical-test-dass21-result.js';
-import { TECHNICAL_TEST_DASS21_MAPPING_VERSION } from '../../technical-test/ensure-dass21-technical-test-mapping.js';
 
 export function composePreliminaryAssessmentRouter(
   database: NodePgDatabase<typeof schema> | null,
@@ -36,7 +33,10 @@ export function composePreliminaryAssessmentRouter(
   formMetadata?: (instrumentVersionId: string) => Readonly<Record<string, unknown>>,
   assessmentRepositoryOverride?: PreliminaryAssessmentRepository,
   responseRepositoryOverride?: AssessmentResponseRepository,
-  technicalDass21?: { score: ScoreCompletedDass21Assessment; result: GetMyTechnicalTestDass21Result },
+  dass21Http?: {
+    scoreCompleted(assessmentId: string, accountId: string): Promise<unknown>;
+    getResult(assessmentId: string, accountId: string): Promise<unknown | null>;
+  },
 ) {
   const router = Router();
   if (!database || !jwt) {
@@ -69,12 +69,7 @@ export function composePreliminaryAssessmentRouter(
     new ReauthorizeAssessment(assessments, consent),
     new GetMyAssessmentResult(assessments, results),
     formMetadata,
-    technicalDass21 ? {
-      scoreCompleted: (assessmentId, accountId) => technicalDass21.score.execute(accountId, {
-        assessmentId, mappingVersion: TECHNICAL_TEST_DASS21_MAPPING_VERSION,
-      }),
-      getResult: (assessmentId, accountId) => technicalDass21.result.execute(assessmentId, accountId),
-    } : undefined,
+    dass21Http,
   );
   const auth = authenticationMiddleware(jwt);
   router.get('/info', auth, (req, res, next) => { void controller.assessmentInfo(req, res).catch(next); });
