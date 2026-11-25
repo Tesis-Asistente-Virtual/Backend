@@ -46,6 +46,7 @@ const requiredConsents = ['conversational_signal_analysis', 'structured_signal_e
 function insufficientPayload(): ConversationalSignalAnalysisPayload {
   const signal = {
     level: 'insufficient_evidence' as const,
+    score: null,
     evidenceCount: 0,
     indicators: [] as [],
     summary: 'Los mensajes seleccionados no ofrecen evidencia textual suficiente para esta dimensión.',

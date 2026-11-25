@@ -1,12 +1,11 @@
 import { and, desc, eq, gt, lte } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '../../../../shared/infrastructure/database/schema.js';
-import { authAccounts } from '../../../authentication/infrastructure/persistence/schema.js';
 import { accountConsentEvents, consentNoticeVersions } from '../../../consent/infrastructure/persistence/schema.js';
 import type { ConsentPurpose } from '../../../consent/domain/model/consent.js';
 import { conversationalSignalAnalyses } from '../../../conversations/infrastructure/persistence/schema.js';
 import { conversationalSignalAnalysisSchema, type ConversationalSignalAnalysis } from '../../../conversational-processing/domain/model/conversational-signal-analysis.js';
-import { ReferralConfirmationInvalid, ReferralConsentRequired, ReferralFeatureUnavailable, ReferralNotFound, ReferralSourceUnavailable, ReferralStateConflict } from '../../application/referral-errors.js';
+import { ReferralConfirmationInvalid, ReferralConsentRequired, ReferralNotFound, ReferralSourceUnavailable, ReferralStateConflict } from '../../application/referral-errors.js';
 import { psychologicalReferralConsentPurpose } from '../../application/referral-policy.js';
 import type { DraftResult, PsychologicalReferralRepository, ReferralRecord, ReserveReferralSendResult } from '../../application/ports/referral-repository.js';
 import { psychologicalReferralReportSchema } from '../../domain/model/psychological-referral.js';
@@ -25,12 +24,6 @@ async function requireCurrentConsent(tx: Tx, accountId: string, purpose: Consent
     .orderBy(desc(accountConsentEvents.sequence)).limit(1);
   if (decision?.action !== 'granted' || decision.noticeVersionId !== notice.id) throw new ReferralConsentRequired();
   return notice.id;
-}
-
-async function requireSyntheticOwner(tx: Tx, accountId: string): Promise<void> {
-  const [account] = await tx.select({ id: authAccounts.id, email: authAccounts.email }).from(authAccounts)
-    .where(eq(authAccounts.id, accountId)).for('share').limit(1);
-  if (!account || !account.email.toLowerCase().endsWith('@example.test')) throw new ReferralFeatureUnavailable();
 }
 
 function sourceFromPayload(payload: unknown): ConversationalSignalAnalysis {
@@ -53,7 +46,6 @@ export class DrizzlePsychologicalReferralRepository implements PsychologicalRefe
 
   async createDraft(input: Parameters<PsychologicalReferralRepository['createDraft']>[0]): Promise<DraftResult> {
     return this.db.transaction(async tx => {
-      await requireSyntheticOwner(tx, input.accountId);
       const noticeId = await requireCurrentConsent(tx, input.accountId, psychologicalReferralConsentPurpose, input.now);
       let source: ConversationalSignalAnalysis | null = null;
       if (input.sourceAnalysisId) {
@@ -102,7 +94,6 @@ export class DrizzlePsychologicalReferralRepository implements PsychologicalRefe
 
   async getForOwner(input: { accountId: string; referralId: string; now: Date }): Promise<ReferralRecord | null> {
     return this.db.transaction(async tx => {
-      await requireSyntheticOwner(tx, input.accountId);
       const [row] = await tx.select().from(psychologicalReferrals).where(and(
         eq(psychologicalReferrals.accountId, input.accountId), eq(psychologicalReferrals.referralId, input.referralId),
       )).for('share').limit(1);
@@ -126,7 +117,6 @@ export class DrizzlePsychologicalReferralRepository implements PsychologicalRefe
 
   async reserveSend(input: Parameters<PsychologicalReferralRepository['reserveSend']>[0]): Promise<ReserveReferralSendResult | null> {
     return this.db.transaction(async tx => {
-      await requireSyntheticOwner(tx, input.accountId);
       const [row] = await tx.select().from(psychologicalReferrals).where(and(
         eq(psychologicalReferrals.accountId, input.accountId), eq(psychologicalReferrals.referralId, input.referralId),
       )).for('update').limit(1);

@@ -36,8 +36,16 @@ async function authorizeTransaction(tx: Parameters<Parameters<AnalysisDatabase['
   return analysisNoticeId;
 }
 
+/** Los análisis guardados antes de la puntuación no tienen `score`: se leen como null. */
+function withLegacyScores(payload: unknown): unknown {
+  if (typeof payload !== 'object' || payload === null || !('signals' in payload) || typeof payload.signals !== 'object' || payload.signals === null) return payload;
+  const signals = Object.fromEntries(Object.entries(payload.signals).map(([dimension, signal]) =>
+    [dimension, typeof signal === 'object' && signal !== null && !('score' in signal) ? { ...signal, score: null } : signal]));
+  return { ...payload, signals };
+}
+
 function parsePayload(payload: unknown): ConversationalSignalAnalysis {
-  return conversationalSignalAnalysisSchema.parse(payload);
+  return conversationalSignalAnalysisSchema.parse(withLegacyScores(payload));
 }
 
 export class DrizzleConversationalSignalAnalysisRepository implements ConversationalSignalAnalysisRepository {

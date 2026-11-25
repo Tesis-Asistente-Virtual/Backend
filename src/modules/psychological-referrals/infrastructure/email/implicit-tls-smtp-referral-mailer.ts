@@ -67,7 +67,7 @@ export class ImplicitTlsSmtpReferralMailer implements ReferralMailer {
       const date = new Date().toUTCString();
       const bodyBase64 = Buffer.from(email.bodyText, 'utf8').toString('base64').match(/.{1,76}/gu)?.join('\r\n') ?? '';
       const message = [
-        `From: <${from}>`, `To: <${email.recipient}>`, 'Subject: Solicitud voluntaria de orientacion psicologica',
+        `From: <${from}>`, `To: <${email.recipient}>`, `Subject: ${email.subject ?? 'Solicitud voluntaria de orientacion psicologica'}`,
         `Date: ${date}`, `Message-ID: ${messageId}`, 'MIME-Version: 1.0',
         'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', bodyBase64, '.',
       ].join('\r\n');

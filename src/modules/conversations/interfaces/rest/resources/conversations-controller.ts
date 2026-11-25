@@ -8,6 +8,7 @@ import { conversationIdParamsSchema, createConversationRequestSchema, pagination
 import { toConversationMessageResource, toConversationResource, toPageResource } from '../transformers/conversation-transformer.js';
 import { StreamConversationMessage, type ConversationMessageStreamEvent } from '../../../application/internal/command-services/stream-conversation-message.js';
 import { DeleteMyConversation } from '../../../application/internal/command-services/delete-my-conversation.js';
+import { ArchiveActiveConversations } from '../../../application/internal/command-services/archive-active-conversations.js';
 
 async function writeWhenReady(res: Response, frame: string, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
@@ -38,6 +39,7 @@ export class ConversationsController {
     private readonly sendMessage?: SendConversationMessage,
     private readonly streamMessage?: StreamConversationMessage,
     private readonly deleteConversation?: DeleteMyConversation,
+    private readonly archiveActiveConversations?: ArchiveActiveConversations,
   ) {}
 
   async create(req: Request, res: Response): Promise<void> {
@@ -70,6 +72,14 @@ export class ConversationsController {
     if (!this.deleteConversation) throw new Error('Conversation suppression is not configured');
     await this.deleteConversation.execute(accountId, id);
     res.status(204).end();
+  }
+
+  async archiveActive(req: Request, res: Response): Promise<void> {
+    const accountId = req.auth?.accountId;
+    if (!accountId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    if (!this.archiveActiveConversations) throw new Error('Conversation archiving is not configured');
+    const archived = await this.archiveActiveConversations.execute(accountId);
+    res.status(200).json({ archived });
   }
 
   async listConversationMessages(req: Request, res: Response): Promise<void> {

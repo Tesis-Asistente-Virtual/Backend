@@ -11,7 +11,8 @@ export type AssessmentDomainErrorCode =
   | 'result_not_found'
   | 'concurrent_modification'
   | 'result_conflict'
-  | 'consent_required';
+  | 'consent_required'
+  | 'daily_limit_reached';
 
 /** Safe domain error: its message and code never contain answers or other sensitive data. */
 export class PreliminaryAssessmentError extends Error {

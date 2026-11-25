@@ -20,6 +20,12 @@ export class DrizzleConversationRepository implements ConversationRepository {
     return toDomain(row);
   }
 
+  async archiveActiveForOwner(accountId: string): Promise<number> {
+    const rows = await this.db.update(conversations).set({ status: 'archived', updatedAt: new Date() })
+      .where(and(eq(conversations.accountId, accountId), eq(conversations.status, 'active'))).returning({ id: conversations.id });
+    return rows.length;
+  }
+
   async findByIdForOwner(id: string, accountId: string): Promise<Conversation | null> {
     const [row] = await this.db.select().from(conversations)
       .where(and(eq(conversations.id, id), eq(conversations.accountId, accountId))).limit(1);

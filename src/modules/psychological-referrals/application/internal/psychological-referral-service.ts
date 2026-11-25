@@ -5,7 +5,7 @@ import type { ReferralMailer } from '../ports/referral-mailer.js';
 import { ReferralMailerError } from '../ports/referral-mailer.js';
 import type { PsychologicalReferralRepository, ReferralRecord } from '../ports/referral-repository.js';
 import { ReferralConfirmationInvalid, ReferralDeliveryUnavailable, ReferralFeatureUnavailable, ReferralNotFound, ReferralStateConflict } from '../referral-errors.js';
-import { isPsychologicalReferralAllowed, type PsychologicalReferralPolicy } from '../referral-policy.js';
+import type { PsychologicalReferralPolicy } from '../referral-policy.js';
 import { createReferralReport, psychologicalReferralPreviewSchema, type PsychologicalReferralReport } from '../../domain/model/psychological-referral.js';
 
 export interface ReferralClock { (): Date }
@@ -45,7 +45,6 @@ export class PsychologicalReferralService {
   ) {}
 
   async create(accountId: string, request: { reason?: string; sourceAnalysisId?: string }, idempotencyKey: string) {
-    this.assertEnabled(accountId);
     const now = this.clock();
     const referralId = this.createId();
     const recipient = this.policy.selectedTestRecipient;
@@ -67,17 +66,21 @@ export class PsychologicalReferralService {
   }
 
   async get(accountId: string, referralId: string) {
-    this.assertEnabled(accountId);
     const record = await this.repository.getForOwner({ accountId: accountId.toLowerCase(), referralId, now: this.clock() });
     if (!record) throw new ReferralNotFound();
     return this.toPreview(record);
   }
 
   async send(accountId: string, input: { referralId: string; previewHash: string; idempotencyKey: string; confirmed: true }) {
-    this.assertEnabled(accountId);
-    if (!this.mailer) throw new ReferralFeatureUnavailable();
+    if (!this.mailer) {
+      console.error('[psychological-referrals] send blocked: SMTP mailer is not configured');
+      throw new ReferralFeatureUnavailable();
+    }
     const recipient = this.policy.selectedTestRecipient;
-    if (!recipient || !this.policy.allowedTestRecipients.includes(recipient)) throw new ReferralFeatureUnavailable();
+    if (!recipient) {
+      console.error('[psychological-referrals] send blocked: test recipient is not configured');
+      throw new ReferralFeatureUnavailable();
+    }
     const reserved = await this.repository.reserveSend({
       accountId: accountId.toLowerCase(), referralId: input.referralId, idempotencyKey: input.idempotencyKey,
       previewHash: input.previewHash, recipient, attemptId: this.createId(), now: this.clock(),
@@ -97,6 +100,10 @@ export class PsychologicalReferralService {
       return { preview: this.toPreview(refreshed), duplicate: false };
     } catch (error) {
       const outcome = error instanceof ReferralMailerError && error.kind === 'unavailable' ? 'failed' : 'delivery_unknown';
+      console.error('[psychological-referrals] delivery failed', {
+        outcome, errorName: error instanceof Error ? error.name : 'unknown',
+        ...(error instanceof ReferralMailerError ? error.diagnostics : {}),
+      });
       await this.repository.markDeliveryFailed({ accountId: accountId.toLowerCase(), referralId: input.referralId, attemptId: reserved.attemptId, outcome });
       throw new ReferralDeliveryUnavailable(outcome === 'failed' ? 'unavailable' : 'delivery_unknown');
     }
@@ -106,10 +113,6 @@ export class PsychologicalReferralService {
     const cancelled = await this.repository.cancelDraft({ accountId: accountId.toLowerCase(), referralId, now: this.clock() });
     if (!cancelled) throw new ReferralNotFound();
     return { referralId, status: 'cancelled' as const };
-  }
-
-  private assertEnabled(accountId: string): void {
-    if (!isPsychologicalReferralAllowed(this.policy, accountId)) throw new ReferralFeatureUnavailable();
   }
 
   private toReportSource(source: ConversationalSignalAnalysis) {

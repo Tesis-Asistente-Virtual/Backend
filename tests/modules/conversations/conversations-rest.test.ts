@@ -31,6 +31,7 @@ function harness(foundConversation: Conversation | null = conversation, generati
     findByIdForOwner: vi.fn(async (id: string, ownerId: string) => id === conversationId && ownerId === accountId ? foundConversation : null),
     listByOwner: vi.fn(async (_ownerId: string, pagination: Pagination): Promise<Page<Conversation>> => ({ items: [conversation], ...pagination, hasMore: false })),
     deleteForOwner: vi.fn(async () => true),
+    archiveActiveForOwner: vi.fn(async () => 0),
   };
   const createMessage = vi.fn(async (_ownerId: string, input: Parameters<ConversationMessageRepository['createForOwner']>[1]) => ({ ...message, role: input.role, content: input.content, status: input.status ?? 'completed' }));
   const messages: ConversationMessageRepository = {

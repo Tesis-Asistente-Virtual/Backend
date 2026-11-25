@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
-export const conversationalSignalAnalysisVersion = 'conversational-signals-1.0.0' as const;
+export const conversationalSignalAnalysisVersion = 'conversational-signals-1.1.0' as const;
+/** Versión anterior, sin puntuación; los análisis guardados con ella siguen siendo válidos. */
+export const legacyConversationalSignalAnalysisVersion = 'conversational-signals-1.0.0' as const;
 export const conversationalSignalDimensions = ['depression', 'anxiety', 'stress'] as const;
 export const exploratoryEvidenceLevels = ['low', 'moderate', 'high', 'insufficient_evidence'] as const;
 export const conversationalSignalIndicators = [
@@ -21,6 +23,8 @@ export const conversationalSignalEvidenceSchema = z.object({
 
 export const conversationalDimensionSignalSchema = z.object({
   level: z.enum(exploratoryEvidenceLevels),
+  /** Estimación 0 a 3 de la intensidad expresada en los mensajes; null si no hay evidencia suficiente o en análisis anteriores. */
+  score: z.number().int().min(0).max(3).nullable(),
   evidenceCount: z.number().int().min(0).max(20),
   indicators: z.array(z.enum(conversationalSignalIndicators)).max(conversationalSignalIndicators.length)
     .refine(items => new Set(items).size === items.length),
@@ -28,6 +32,9 @@ export const conversationalDimensionSignalSchema = z.object({
   observedPattern: z.enum(['single_report', 'recurring_across_messages', 'context_linked', 'insufficient_evidence']),
   evidence: z.array(conversationalSignalEvidenceSchema).max(20),
 }).strict().superRefine((signal, context) => {
+  if (signal.level === 'insufficient_evidence' && signal.score !== null) {
+    context.addIssue({ code: 'custom', path: ['score'], message: 'Insufficient evidence cannot have a score' });
+  }
   if (signal.evidenceCount !== signal.evidence.length) {
     context.addIssue({ code: 'custom', path: ['evidenceCount'], message: 'Evidence count must match included message references' });
   }
@@ -65,7 +72,7 @@ export const conversationalSignalAnalysisSchema = z.object({
   accountId: z.string().uuid(),
   status: z.literal('available'),
   source: z.literal('conversation_user_messages'),
-  analysisVersion: z.literal(conversationalSignalAnalysisVersion),
+  analysisVersion: z.enum([legacyConversationalSignalAnalysisVersion, conversationalSignalAnalysisVersion]),
   modelVersion: z.string().trim().min(1).max(100),
   analyzedAt: z.string().datetime(),
   period: z.object({ start: z.string().datetime().nullable(), end: z.string().datetime().nullable() }).strict(),

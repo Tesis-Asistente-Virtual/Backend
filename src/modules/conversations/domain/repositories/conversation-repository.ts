@@ -6,4 +6,6 @@ export interface ConversationRepository {
   findByIdForOwner(id: string, accountId: string): Promise<Conversation | null>;
   listByOwner(accountId: string, pagination: Pagination): Promise<Page<Conversation>>;
   deleteForOwner(accountId: string, conversationId: string): Promise<boolean>;
+  /** Pasa a archivada cualquier conversación activa del titular. Devuelve cuántas cambió. */
+  archiveActiveForOwner(accountId: string): Promise<number>;
 }

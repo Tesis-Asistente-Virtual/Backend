@@ -35,13 +35,7 @@ export const env = {
   wellbeingRecommendationsDeployment: process.env.WELLBEING_RECOMMENDATIONS_DEPLOYMENT,
   wellbeingRecommendationsAllowedAccountIds: (process.env.WELLBEING_RECOMMENDATIONS_ALLOWED_ACCOUNT_IDS ?? '')
     .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
-  psychologicalReferralsEnabled: process.env.PSYCHOLOGICAL_REFERRALS_ENABLED === 'true',
-  psychologicalReferralsDeployment: process.env.PSYCHOLOGICAL_REFERRALS_DEPLOYMENT,
-  psychologicalReferralsAllowedAccountIds: (process.env.PSYCHOLOGICAL_REFERRALS_ALLOWED_ACCOUNT_IDS ?? '')
-    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
-  psychologicalReferralTestRecipients: (process.env.PSYCHOLOGICAL_REFERRAL_TEST_RECIPIENTS ?? '')
-    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
-  psychologicalReferralTestRecipient: process.env.PSYCHOLOGICAL_REFERRAL_TEST_RECIPIENT?.trim().toLowerCase() || undefined,
+  psychologicalReferralTestRecipient: process.env.PSYCHOLOGICAL_REFERRAL_TEST_RECIPIENT?.trim().toLowerCase() || 'animoproyecto@gmail.com',
   psychologicalReferralSmtpHost: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_HOST?.trim() || undefined,
   psychologicalReferralSmtpPort: Number(process.env.PSYCHOLOGICAL_REFERRAL_SMTP_PORT ?? 465),
   psychologicalReferralSmtpUsername: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_USERNAME,

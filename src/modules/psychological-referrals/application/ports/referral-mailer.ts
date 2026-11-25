@@ -1,5 +1,6 @@
 export interface ReferralEmail {
   readonly recipient: string;
+  readonly subject?: string;
   readonly bodyText: string;
 }
 

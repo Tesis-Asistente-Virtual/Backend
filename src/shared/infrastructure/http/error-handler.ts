@@ -73,6 +73,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof PreliminaryAssessmentError) {
     if (err.code === 'assessment_not_found' || err.code === 'result_not_found') { res.status(404).json({ error: err.code === 'assessment_not_found' ? 'Assessment not found' : 'Assessment result not found' }); return; }
     if (err.code === 'consent_required') { res.status(403).json({ error: 'Current consent is required' }); return; }
+    if (err.code === 'daily_limit_reached') { res.status(409).json({ error: 'Daily assessment limit reached' }); return; }
     if (['invalid_transition', 'assessment_closed', 'instrument_unavailable', 'responses_incomplete', 'concurrent_modification', 'result_conflict'].includes(err.code)) {
       res.status(409).json({ error: 'Assessment operation conflicts with its current state or availability' }); return;
     }

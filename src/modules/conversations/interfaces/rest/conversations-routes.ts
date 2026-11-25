@@ -20,6 +20,7 @@ import { DrizzleConsentRepository } from '../../../consent/infrastructure/persis
 import { CheckConsentForPurpose } from '../../../consent/application/internal/query-services/check-consent-for-purpose.js';
 import { ConsentConversationProcessingAuthorizer } from '../../infrastructure/persistence/consent-conversation-processing-authorizer.js';
 import { DeleteMyConversation } from '../../application/internal/command-services/delete-my-conversation.js';
+import { ArchiveActiveConversations } from '../../application/internal/command-services/archive-active-conversations.js';
 
 const router = Router();
 const jwt = JwtAccessTokenService.fromEnvironment();
@@ -62,6 +63,7 @@ if (db && pool && jwt) {
     sendMessage,
     streamMessage,
     new DeleteMyConversation(conversations, turnLock),
+    new ArchiveActiveConversations(conversations),
   );
   router.post('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.create(req, res).catch(next); });
   router.get('/', authenticationMiddleware(jwt), (req, res, next) => { void controller.list(req, res).catch(next); });
@@ -70,6 +72,7 @@ if (db && pool && jwt) {
   router.post('/:id/messages/stream', authenticationMiddleware(jwt), (req, res, next) => { void controller.streamConversationMessage(req, res).catch(next); });
   router.get('/:id', authenticationMiddleware(jwt), (req, res, next) => { void controller.get(req, res).catch(next); });
   router.delete('/:id', authenticationMiddleware(jwt), (req, res, next) => { void controller.delete(req, res).catch(next); });
+  router.post('/archive-active', authenticationMiddleware(jwt), (req, res, next) => { void controller.archiveActive(req, res).catch(next); });
 } else {
   for (const method of ['post', 'get'] as const) {
     router[method]('/', (_req, _res, next) => next(new Error('Conversation dependencies are not configured')));
