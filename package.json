@@ -6,8 +6,10 @@
   "scripts": {
     "test": "vitest run --exclude tests/integration/**",
     "test:integration": "vitest run tests/integration",
+    "test:psychological-referrals:integration": "vitest run tests/integration/psychological-referrals-postgres-http.integration.test.ts",
     "test:staging:e2e": "vitest run tests/integration/integrated-synthetic-staging.e2e.test.ts",
     "recommendations:check:synthetic-openai": "tsx scripts/run-synthetic-recommendations-openai-check.ts",
+    "referrals:check:synthetic-email": "tsx scripts/run-synthetic-psychological-referral-email-check.ts",
     "db:migrate:test": "tsx scripts/migrate-test-db.ts",
     "db:migrate:demo": "tsx scripts/migrate-demo-db.ts",
     "demo:verify-db": "tsx scripts/verify-demo-db.ts",

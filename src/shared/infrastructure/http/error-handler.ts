@@ -15,6 +15,7 @@ import { MonitoringError } from '../../../modules/longitudinal-monitoring/domain
 import { LongitudinalMonitoringDomainError } from '../../../modules/longitudinal-monitoring/domain/model/monitoring-contracts.js';
 import { RecommendationsAnalysisUnavailable, RecommendationsConsentRequired, RecommendationsGenerationInProgress, RecommendationsPersistenceConflict, RecommendationsUnavailable } from '../../../modules/recommendations/application/recommendation-errors.js';
 import { RecommendationGenerationError } from '../../../modules/recommendations/application/ports/recommendation-generator.js';
+import { ReferralConfirmationInvalid, ReferralConsentRequired, ReferralDeliveryUnavailable, ReferralFeatureUnavailable, ReferralNotFound, ReferralSourceUnavailable, ReferralStateConflict } from '../../../modules/psychological-referrals/application/referral-errors.js';
 
 function hasUniqueViolationCode(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === '23505';
@@ -108,6 +109,12 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof RecommendationGenerationError) {
     res.status(err.kind === 'invalid_response' ? 502 : 503).json({ error: 'Recommendation generation is temporarily unavailable' }); return;
   }
+  if (err instanceof ReferralFeatureUnavailable) { res.status(503).json({ error: 'Psychological referral is unavailable' }); return; }
+  if (err instanceof ReferralConsentRequired) { res.status(403).json({ error: 'Current psychological referral consent is required' }); return; }
+  if (err instanceof ReferralNotFound || err instanceof ReferralSourceUnavailable) { res.status(404).json({ error: 'Psychological referral or source analysis was not found' }); return; }
+  if (err instanceof ReferralConfirmationInvalid) { res.status(409).json({ error: 'Explicit confirmation does not match the current preview' }); return; }
+  if (err instanceof ReferralStateConflict) { res.status(409).json({ error: 'Psychological referral state conflicts with this request' }); return; }
+  if (err instanceof ReferralDeliveryUnavailable) { res.status(503).json({ error: 'Referral email delivery could not be confirmed' }); return; }
   console.error('Unhandled request error');
   res.status(500).json({ error: 'Internal server error' });
 };

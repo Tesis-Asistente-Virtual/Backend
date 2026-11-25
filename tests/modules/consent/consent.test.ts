@@ -22,6 +22,7 @@ describe('Consent & Privacy', () => {
       'structured_signal_extraction',
       'conversational_signal_analysis',
       'wellbeing_recommendations',
+      'psychological_referral_sharing',
       'longitudinal_monitoring',
       'preliminary_assessment',
     ]);

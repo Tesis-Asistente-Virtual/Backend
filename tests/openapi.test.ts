@@ -7,10 +7,10 @@ import swaggerUi from 'swagger-ui-express';
 const require = createRequire(import.meta.url);
 
 describe('OpenAPI document', () => {
-  it('generates OpenAPI 3.0 documentation for all forty-two operations', () => {
+  it('generates OpenAPI 3.0 documentation for all forty-six operations', () => {
     expect(openApiDocument.openapi).toBe('3.0.3');
     const operations = Object.values(openApiDocument.paths).flatMap(path => Object.keys(path));
-    expect(operations).toHaveLength(42);
+    expect(operations).toHaveLength(46);
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-up');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/sign-in');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/auth/refresh');
@@ -40,6 +40,9 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.paths).toHaveProperty('/api/v1/monitoring/enrollments/{id}/sessions/{sessionId}/conversation');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/me/recommendations/generate');
     expect(openApiDocument.paths).toHaveProperty('/api/v1/me/recommendations/latest');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/me/psychological-referrals');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/me/psychological-referrals/{id}');
+    expect(openApiDocument.paths).toHaveProperty('/api/v1/me/psychological-referrals/{id}/send');
     expect(openApiDocument.paths).toHaveProperty('/health');
     expect(openApiDocument.components.schemas).toHaveProperty('SignUpRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('UpdateMyProfileRequest');
@@ -55,6 +58,8 @@ describe('OpenAPI document', () => {
     expect(openApiDocument.components.schemas).toHaveProperty('MonitoringSession');
     expect(openApiDocument.components.schemas).toHaveProperty('GenerateRecommendationsRequest');
     expect(openApiDocument.components.schemas).toHaveProperty('RecommendationResponse');
+    expect(openApiDocument.components.schemas).toHaveProperty('CreatePsychologicalReferralRequest');
+    expect(openApiDocument.components.schemas).toHaveProperty('PsychologicalReferralPreview');
   });
   it('marks both private profile operations as Bearer protected', () => {
     const mePath = openApiDocument.paths['/api/v1/users/me'];
@@ -88,6 +93,12 @@ describe('OpenAPI document', () => {
   it('marks recommendations operations as Bearer protected', () => {
     expect(openApiDocument.paths['/api/v1/me/recommendations/generate'].post.security).toEqual([{ bearerAuth: [] }]);
     expect(openApiDocument.paths['/api/v1/me/recommendations/latest'].get.security).toEqual([{ bearerAuth: [] }]);
+  });
+  it('marks psychological referral operations as Bearer protected', () => {
+    expect(openApiDocument.paths['/api/v1/me/psychological-referrals'].post.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/me/psychological-referrals/{id}'].get.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/me/psychological-referrals/{id}'].delete.security).toEqual([{ bearerAuth: [] }]);
+    expect(openApiDocument.paths['/api/v1/me/psychological-referrals/{id}/send'].post.security).toEqual([{ bearerAuth: [] }]);
   });
 
   it('generates local Swagger asset URLs and includes the installed CSS and JS bundles', () => {

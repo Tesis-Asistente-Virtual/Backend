@@ -35,6 +35,18 @@ export const env = {
   wellbeingRecommendationsDeployment: process.env.WELLBEING_RECOMMENDATIONS_DEPLOYMENT,
   wellbeingRecommendationsAllowedAccountIds: (process.env.WELLBEING_RECOMMENDATIONS_ALLOWED_ACCOUNT_IDS ?? '')
     .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
+  psychologicalReferralsEnabled: process.env.PSYCHOLOGICAL_REFERRALS_ENABLED === 'true',
+  psychologicalReferralsDeployment: process.env.PSYCHOLOGICAL_REFERRALS_DEPLOYMENT,
+  psychologicalReferralsAllowedAccountIds: (process.env.PSYCHOLOGICAL_REFERRALS_ALLOWED_ACCOUNT_IDS ?? '')
+    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
+  psychologicalReferralTestRecipients: (process.env.PSYCHOLOGICAL_REFERRAL_TEST_RECIPIENTS ?? '')
+    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
+  psychologicalReferralTestRecipient: process.env.PSYCHOLOGICAL_REFERRAL_TEST_RECIPIENT?.trim().toLowerCase() || undefined,
+  psychologicalReferralSmtpHost: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_HOST?.trim() || undefined,
+  psychologicalReferralSmtpPort: Number(process.env.PSYCHOLOGICAL_REFERRAL_SMTP_PORT ?? 465),
+  psychologicalReferralSmtpUsername: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_USERNAME,
+  psychologicalReferralSmtpPassword: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_PASSWORD,
+  psychologicalReferralSmtpFrom: process.env.PSYCHOLOGICAL_REFERRAL_SMTP_FROM?.trim() || undefined,
   // Pilot policy gate removed by request (local testing): analysis is enabled for every account,
   // with the 90-day retention already defined by the module.
   conversationalSignalAnalysisPolicy: Object.freeze({ enabled: true, retentionDays: 90, allowedAccountIds: Object.freeze([] as string[]) }),
